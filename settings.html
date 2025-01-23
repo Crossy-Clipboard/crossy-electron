@@ -120,21 +120,14 @@
             <h2>Preferences</h2>
             <div class="preference-item">
                 <label>
-                    <input type="checkbox" id="autoClipboard">
-                    Auto Clipboard Sync
-                    <span class="tooltip">Automatically sync clipboard changes (Default: Off)</span>
+                    <input type="checkbox" id="automaticClipboardSync" onchange="savePreferences()">
+                    Automatic Clipboard Sync
+                    <span class="tooltip">Automatically sync with newest clipboard content (local or cloud)</span>
                 </label>
             </div>
             <div class="preference-item">
                 <label>
-                    <input type="checkbox" id="autoUpload">
-                    Auto Upload
-                    <span class="tooltip">Automatically upload clipboard contents (Default: Off)</span>
-                </label>
-            </div>
-            <div class="preference-item">
-                <label>
-                    <input type="checkbox" id="notifications">
+                    <input type="checkbox" id="notifications" onchange="savePreferences()">
                     Show Notifications
                     <span class="tooltip">Display desktop notifications (Default: On)</span>
                 </label>
@@ -211,20 +204,28 @@
         // Add preference loading/saving
         async function loadPreferences() {
             const settings = await ipcRenderer.invoke('getSettings');
-            document.getElementById('autoClipboard').checked = settings.preferences.autoClipboard;
-            document.getElementById('autoUpload').checked = settings.preferences.autoUpload;
-            document.getElementById('notifications').checked = settings.preferences.notifications;
-            document.getElementById('refreshInterval').value = settings.refreshIntervalSeconds;
+            document.getElementById('automaticClipboardSync').checked = 
+                settings.preferences.automaticClipboardSync;
+            document.getElementById('notifications').checked = 
+                settings.preferences.notifications;
+            document.getElementById('refreshInterval').value = 
+                settings.refreshIntervalSeconds;
         }
 
         async function savePreferences() {
             const settings = await ipcRenderer.invoke('getSettings');
-            settings.preferences = {
-                autoClipboard: document.getElementById('autoClipboard').checked,
-                autoUpload: document.getElementById('autoUpload').checked,
-                notifications: document.getElementById('notifications').checked
+            // Create a copy of the settings to modify
+            const newSettings = { ...settings };
+            newSettings.preferences = {
+                automaticClipboardSync: 
+                    document.getElementById('automaticClipboardSync').checked,
+                notifications: 
+                    document.getElementById('notifications').checked
             };
-            await ipcRenderer.invoke('saveSettings', settings);
+            await ipcRenderer.invoke('saveSettings', newSettings);
+            
+            // Force refresh of monitoring
+            await ipcRenderer.invoke('refreshMonitoring');
         }
 
         // Add to window load event

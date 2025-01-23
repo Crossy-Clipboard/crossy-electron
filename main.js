@@ -6,45 +6,28 @@ import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
 
-const schema = {
-    apiKey: {
-        type: 'string',
-        default: ''
+const DEFAULT_SETTINGS = {
+    apiKey: '',
+    preferences: {
+        automaticClipboardSync: false,
+        notifications: true
     },
-    apiBaseUrl: {
-        type: 'string',
-        default: 'https://crossyclip.com'
-    },
-    refreshIntervalSeconds: {
-        type: 'number',
-        default: 60
-    },
+    refreshIntervalSeconds: 60,
+    apiBaseUrl: 'https://clipboard.cloudydestiny.com',
     theme: {
-        type: 'object',
-        properties: {
-            primaryColor: { type: 'string', default: '#6200ee' },
-            hoverColor: { type: 'string', default: '#3700b3' },
-            bgColor: { type: 'string', default: '#121212' },
-            surfaceColor: { type: 'string', default: '#1e1e1e' },
-            textColor: { type: 'string', default: '#ffffff' }
-        }
+        primaryColor: '#6200ee',
+        hoverColor: '#3700b3',
+        bgColor: '#121212',
+        surfaceColor: '#1e1e1e',
+        textColor: '#ffffff'
     }
 };
 
-// Add store initialization function
+// Remove the schema constant and modify initStore
 const initStore = () => {
-    const store = new Store({
-        defaults: {
-            apiKey: '',
-            preferences: {
-                autoClipboard: false, // Automatically sync clipboard changes
-                autoUpload: false,    // Automatically upload clipboard contents
-                notifications: true    // Show desktop notifications
-            },
-            refreshIntervalSeconds: 60
-        }
+    return new Store({
+        defaults: DEFAULT_SETTINGS
     });
-    return store;
 };
 
 // Make sure initStore is called before use
@@ -52,9 +35,26 @@ const store = initStore();
 
 let mainWindow;
 let refreshInterval;
+let lastLocalClipboardTimestamp = Date.now();
+let clipboardMonitoringInterval; // Add this at the top with other global variables
 
 const getSettings = () => {
-    return store?.store || DEFAULT_SETTINGS;
+    const defaults = {
+        ...DEFAULT_SETTINGS,
+        preferences: {
+            ...DEFAULT_SETTINGS.preferences
+        }
+    };
+    
+    const settings = store?.store || defaults;
+    
+    // Ensure preferences exist with correct structure
+    settings.preferences = {
+        ...defaults.preferences,
+        ...settings.preferences
+    };
+    
+    return settings;
 };
 
 const getAppKey = () => {
@@ -93,6 +93,7 @@ const setupIpcHandlers = () => {
     });
 
     ipcMain.handle('saveSettings', async (event, newSettings) => {
+        console.log('[DEBUG] Saving new settings:', newSettings);
         store.set(newSettings);
         setupRefreshInterval();
         return store.get();
@@ -144,6 +145,11 @@ const setupIpcHandlers = () => {
             throw error;
         }
     });
+
+    ipcMain.handle('refreshMonitoring', () => {
+        console.log('[DEBUG] Handling refresh monitoring request');
+        setupClipboardMonitoring();
+    });
 };
 
 const createWindow = () => {
@@ -161,6 +167,100 @@ const createWindow = () => {
     mainWindow.loadFile('index.html');
 };
 
+const checkAndSyncClipboard = async () => {
+    const settings = getSettings();
+    if (!settings.preferences.automaticClipboardSync) return;
+
+    const appKey = getAppKey();
+    if (!appKey) return;
+
+    try {
+        // Get cloud clipboard timestamp
+        const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
+            headers: { AppKey: appKey }
+        });
+        
+        const cloudTimestamp = parseInt(response.headers['x-clipboard-timestamp']);
+        
+        // Compare timestamps and sync accordingly
+        if (cloudTimestamp > lastLocalClipboardTimestamp) {
+            // Cloud is newer, update local
+            await cloudPaste();
+        } else if (lastLocalClipboardTimestamp > cloudTimestamp) {
+            // Local is newer, update cloud
+            await cloudCopy();
+        }
+    } catch (error) {
+        console.error('Sync check failed:', error);
+    }
+};
+
+let lastClipboardContent = {
+    text: '',
+    image: null,
+    filePath: null
+};
+
+const setupClipboardMonitoring = () => {
+    // Add logging
+    console.log('[DEBUG] Setting up clipboard monitoring...');
+    
+    if (clipboardMonitoringInterval) {
+        console.log('[DEBUG] Clearing existing monitoring interval');
+        clearInterval(clipboardMonitoringInterval);
+        clipboardMonitoringInterval = null;
+    }
+
+    const settings = getSettings();
+    console.log('[DEBUG] Current settings:', {
+        automaticClipboardSync: settings.preferences.automaticClipboardSync
+    });
+
+    // Explicitly check boolean value
+    if (settings.preferences.automaticClipboardSync !== true) {
+        console.log('[INFO] Automatic clipboard sync disabled');
+        return;
+    }
+
+    console.log('[INFO] Starting clipboard monitoring');
+    clipboardMonitoringInterval = setInterval(() => {
+        const currentText = clipboard.readText();
+        const currentImage = clipboard.readImage();
+        
+        // Check for changes in text content
+        if (currentText && currentText !== lastClipboardContent.text) {
+            lastClipboardContent.text = currentText;
+            lastLocalClipboardTimestamp = Date.now();
+            cloudCopy();
+        }
+        
+        // Check for changes in image content
+        if (!currentImage.isEmpty() && 
+            currentImage.toDataURL() !== lastClipboardContent.image) {
+            lastClipboardContent.image = currentImage.toDataURL();
+            lastLocalClipboardTimestamp = Date.now();
+            cloudCopy();
+        }
+        
+        // Check for file paths in clipboard
+        try {
+            const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
+            const filePaths = rawFilePaths
+                .split('\0')
+                .filter(Boolean)
+                .map(fp => fp.replace(/\\/g, '\\'));
+                
+            if (filePaths[0] && filePaths[0] !== lastClipboardContent.filePath) {
+                lastClipboardContent.filePath = filePaths[0];
+                lastLocalClipboardTimestamp = Date.now();
+                cloudCopy();
+            }
+        } catch (error) {
+            // Ignore errors when no file paths are in clipboard
+        }
+    }, 1000); // Poll every second
+};
+
 function setupRefreshInterval() {
     if (refreshInterval) {
         clearInterval(refreshInterval);
@@ -168,6 +268,7 @@ function setupRefreshInterval() {
     const settings = store.get();
     const intervalMs = settings.refreshIntervalSeconds * 1000;
     refreshInterval = setInterval(() => {
+        checkAndSyncClipboard();
         mainWindow?.webContents.send('triggerRefresh');
     }, intervalMs);
 }
@@ -347,19 +448,22 @@ async function handleFileDownload(filename) {
 }
 
 app.whenReady().then(async () => {
-    await initStore();
-    createWindow();
-    setupIpcHandlers();
-    setupRefreshInterval();
-    globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
-    globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
+    try {
+        await initStore();
+        createWindow();
+        setupIpcHandlers();
+        setupRefreshInterval();
+        setupClipboardMonitoring();
+        globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
+        globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
 
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    });
-}).catch(error => {
-    console.error('Startup error:', error);
-    app.quit();
+        app.on('activate', () => {
+            if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        });
+    } catch (error) {
+        console.error('Startup error:', error);
+        app.quit();
+    }
 });
 
 app.on('will-quit', () => {
