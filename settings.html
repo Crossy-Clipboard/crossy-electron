@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Crossy Clipboard</title>
+    <style>
+        :root {
+            --primary-color: #6200ee;
+            --hover-color: #3700b3;
+            --bg-color: #121212;
+            --surface-color: #1e1e1e;
+            --text-color: #ffffff;
+        }
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
+        }
+        .header {
+            background-color: var(--surface-color);
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .header h1 {
+            margin: 0;
+        }
+        .settings-container {
+            padding: 20px;
+        }
+        .setting-group {
+            background-color: var(--surface-color);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            margin-bottom: 20px;
+        }
+        .setting-group h2 {
+            margin-top: 0;
+        }
+        button {
+            padding: 8px 16px;
+            background: var(--primary-color);
+            color: var(--text-color);
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: var(--hover-color);
+        }
+        input {
+            padding: 8px;
+            margin-right: 10px;
+            width: 300px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text-color);
+            border-radius: 4px;
+        }
+        .current-key {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+        .api-key {
+            font-family: monospace;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Crossy Clipboard Settings</h1>
+        <button onclick="window.location.href='index.html'">Back</button>
+    </div>
+    <div class="settings-container">
+        <div class="setting-group">
+            <h2>API Key</h2>
+            <div class="current-key">
+                <p>Current key: <span id="maskedKey" class="api-key">••••••••</span>
+                <button onclick="toggleKeyVisibility()">Show/Hide</button></p>
+            </div>
+            <div>
+                <input type="text" id="apiKeyInput" placeholder="Enter new API key">
+                <button onclick="saveApiKey()">Save</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        let keyVisible = false;
+        let currentKey = '';
+
+        async function loadSettings() {
+            const settings = await ipcRenderer.invoke('getSettings');
+            const theme = settings.theme;
+            
+            document.documentElement.style.setProperty('--primary-color', theme.primaryColor);
+            document.documentElement.style.setProperty('--hover-color', theme.hoverColor);
+            document.documentElement.style.setProperty('--bg-color', theme.bgColor);
+            document.documentElement.style.setProperty('--surface-color', theme.surfaceColor);
+            document.documentElement.style.setProperty('--text-color', theme.textColor);
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            await loadSettings();
+            currentKey = await ipcRenderer.invoke('getApiKey');
+            document.getElementById('maskedKey').textContent = '•'.repeat(currentKey?.length || 8);
+        });
+
+        function toggleKeyVisibility() {
+            keyVisible = !keyVisible;
+            document.getElementById('maskedKey').textContent = 
+                keyVisible ? currentKey : '•'.repeat(currentKey?.length || 8);
+        }
+
+        async function saveApiKey() {
+            const apiKey = document.getElementById('apiKeyInput').value;
+            if (!apiKey) {
+                alert('Please enter an API key');
+                return;
+            }
+            await ipcRenderer.send('saveApiKey', apiKey);
+            window.location.reload();
+        }
+    </script>
+</body>
+</html>
