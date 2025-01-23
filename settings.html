@@ -74,6 +74,27 @@
             font-family: monospace;
             letter-spacing: 2px;
         }
+        /* Add tooltip styles */
+        .tooltip {
+            display: none;
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            max-width: 200px;
+            z-index: 100;
+        }
+
+        .preference-item:hover .tooltip,
+        .setting-group div:hover .tooltip {
+            display: block;
+        }
+
+        .preference-item {
+            position: relative;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -87,10 +108,45 @@
             <div class="current-key">
                 <p>Current key: <span id="maskedKey" class="api-key">••••••••</span>
                 <button onclick="toggleKeyVisibility()">Show/Hide</button></p>
+                <span class="tooltip">Your API key for connecting to the Crossy Clipboard service</span>
             </div>
             <div>
                 <input type="text" id="apiKeyInput" placeholder="Enter new API key">
                 <button onclick="saveApiKey()">Save</button>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <h2>Preferences</h2>
+            <div class="preference-item">
+                <label>
+                    <input type="checkbox" id="autoClipboard">
+                    Auto Clipboard Sync
+                    <span class="tooltip">Automatically sync clipboard changes (Default: Off)</span>
+                </label>
+            </div>
+            <div class="preference-item">
+                <label>
+                    <input type="checkbox" id="autoUpload">
+                    Auto Upload
+                    <span class="tooltip">Automatically upload clipboard contents (Default: Off)</span>
+                </label>
+            </div>
+            <div class="preference-item">
+                <label>
+                    <input type="checkbox" id="notifications">
+                    Show Notifications
+                    <span class="tooltip">Display desktop notifications (Default: On)</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <h2>Refresh Interval</h2>
+            <div>
+                <input type="number" id="refreshInterval" min="1" max="3600" placeholder="Seconds">
+                <button onclick="saveRefreshInterval()">Save</button>
+                <span class="tooltip">How often to check for new clipboard content (Default: 60 seconds)</span>
             </div>
         </div>
     </div>
@@ -132,6 +188,52 @@
             await ipcRenderer.send('saveApiKey', apiKey);
             window.location.reload();
         }
+
+        async function loadCurrentSettings() {
+            const settings = await ipcRenderer.invoke('getSettings');
+            currentKey = await ipcRenderer.invoke('getApiKey');
+            document.getElementById('maskedKey').textContent = '•'.repeat(currentKey?.length || 8);
+            document.getElementById('currentInterval').textContent = settings.refreshIntervalSeconds;
+        }
+
+        async function saveRefreshInterval() {
+            const interval = parseInt(document.getElementById('refreshInterval').value);
+            if (isNaN(interval) || interval < 1 || interval > 3600) {
+                alert('Please enter a valid interval between 1 and 3600 seconds');
+                return;
+            }
+            const settings = await ipcRenderer.invoke('getSettings');
+            settings.refreshIntervalSeconds = interval;
+            await ipcRenderer.invoke('saveSettings', settings);
+            window.location.reload();
+        }
+
+        // Add preference loading/saving
+        async function loadPreferences() {
+            const settings = await ipcRenderer.invoke('getSettings');
+            document.getElementById('autoClipboard').checked = settings.preferences.autoClipboard;
+            document.getElementById('autoUpload').checked = settings.preferences.autoUpload;
+            document.getElementById('notifications').checked = settings.preferences.notifications;
+            document.getElementById('refreshInterval').value = settings.refreshIntervalSeconds;
+        }
+
+        async function savePreferences() {
+            const settings = await ipcRenderer.invoke('getSettings');
+            settings.preferences = {
+                autoClipboard: document.getElementById('autoClipboard').checked,
+                autoUpload: document.getElementById('autoUpload').checked,
+                notifications: document.getElementById('notifications').checked
+            };
+            await ipcRenderer.invoke('saveSettings', settings);
+        }
+
+        // Add to window load event
+        window.addEventListener('DOMContentLoaded', async () => {
+            await loadSettings();
+            await loadPreferences();
+        });
+
+        window.addEventListener('DOMContentLoaded', loadCurrentSettings);
     </script>
 </body>
 </html>

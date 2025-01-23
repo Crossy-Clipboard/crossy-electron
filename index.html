@@ -75,14 +75,23 @@
 
     <div class="main-content">
         <div class="clipboard-content">
-            <p id="clipboardText">Loading clipboard content...</p>
+            <div id="clipboardInfo">
+                <p id="clipboardType"></p>
+                <p id="clipboardText">Loading clipboard content...</p>
+            </div>
             <button onclick="fetchClipboardContent()">Refresh</button>
+            <div style="margin-top: 20px;">
+                <button id="downloadButton" style="display: none;" onclick="handleFileDownload()">Download to...</button>
+            </div>
         </div>
     </div>
 
     <script>
         const { ipcRenderer } = require('electron');
         
+        // Add at the top of <script> section
+        let currentFilename = '';
+
         // Load settings from main process
         async function loadSettings() {
             const settings = await ipcRenderer.invoke('getSettings');
@@ -95,7 +104,15 @@
             document.documentElement.style.setProperty('--text-color', theme.textColor);
         }
 
+        let lastRefreshTime = 0;
+        const REFRESH_DEBOUNCE = 1000; // 1 second minimum between refreshes
+
+        // Update fetchClipboardContent() to store filename and add error handling:
         const fetchClipboardContent = async () => {
+            const now = Date.now();
+            if (now - lastRefreshTime < REFRESH_DEBOUNCE) return;
+            lastRefreshTime = now;
+
             const storedKey = await ipcRenderer.invoke('getApiKey');
             const settings = await ipcRenderer.invoke('getSettings');
             
@@ -103,22 +120,68 @@
                 const response = await fetch(`${settings.apiBaseUrl}/app/paste/latest`, {
                     headers: { AppKey: storedKey },
                 });
-                const data = await response.json();
-                if (data.type === 'text') {
-                    document.getElementById('clipboardText').textContent = data.content;
+
+                const contentType = response.headers.get('content-type');
+                const typeEl = document.getElementById('clipboardType');
+                const textEl = document.getElementById('clipboardText');
+                const downloadButton = document.getElementById('downloadButton');
+
+                if (contentType.includes('application/json')) {
+                    const data = await response.json();
+                    typeEl.textContent = `Type: ${data.type}`;
+                    textEl.textContent = data.type === 'text' ? data.content : '';
+                    downloadButton.style.display = 'none';
+                } else if (contentType.startsWith('image/')) {
+                    const format = contentType.split('/')[1];
+                    typeEl.textContent = 'Type: image';
+                    textEl.textContent = `Format: ${format}`;
+                    downloadButton.style.display = 'inline-block';
                 } else {
-                    document.getElementById('clipboardText').textContent = 'No text content in clipboard';
+                    const filename = response.headers.get('content-disposition')
+                        ?.split('filename=')[1]?.replace(/"/g, '') || 'file';
+                    currentFilename = filename; // Store filename for later use
+                    typeEl.textContent = 'Type: file';
+                    textEl.textContent = `Filename: ${filename}`;
+                    downloadButton.style.display = 'inline-block';
                 }
             } catch (error) {
-                document.getElementById('clipboardText').textContent = 'Failed to fetch clipboard content';
+                document.getElementById('clipboardType').textContent = 'Error';
+                document.getElementById('clipboardText').textContent = 
+                    `Failed to fetch clipboard content: ${error.message}`;
+                document.getElementById('downloadButton').style.display = 'none';
             }
         };
+
+        // Replace the existing handleFileDownload() function with:
+
+        async function handleFileDownload() {
+            try {
+                const success = await ipcRenderer.invoke('downloadFile', currentFilename);
+                if (success) {
+                    document.getElementById('clipboardText').textContent = 'File downloaded successfully!';
+                }
+            } catch (error) {
+                document.getElementById('clipboardType').textContent = 'Error';
+                document.getElementById('clipboardText').textContent = 
+                    `Failed to download file: ${error.message}`;
+            }
+        }
 
         // Load settings on startup
         loadSettings();
 
-        // Refresh clipboard content every minute
-        setInterval(fetchClipboardContent, 60000);
+        // Add event listener for refresh trigger
+        ipcRenderer.on('triggerRefresh', () => {
+            fetchClipboardContent();
+        });
+
+        // Add error event listener
+        ipcRenderer.on('clipboardError', (event, message) => {
+            document.getElementById('clipboardType').textContent = 'Error';
+            document.getElementById('clipboardText').textContent = 
+                `Clipboard operation failed: ${message}`;
+            document.getElementById('downloadButton').style.display = 'none';
+        });
 
         // Initial fetch on page load
         fetchClipboardContent();

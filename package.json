@@ -1,6 +1,7 @@
 {
   "name": "crossy-electron",
   "version": "1.0.0",
+  "type": "module",
   "main": "main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -23,6 +24,7 @@
   "dependencies": {
     "axios": "^1.7.9",
     "electron": "^34.0.1",
-    "electron-store": "^10.0.0"
+    "electron-store": "^10.0.0",
+    "form-data": "^4.0.1"
   }
 }
