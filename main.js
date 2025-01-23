@@ -1,6 +1,6 @@
 // main.js
 import Store from 'electron-store';
-import { app, BrowserWindow, globalShortcut, clipboard, ipcMain, dialog, nativeImage } from 'electron';
+import { app, BrowserWindow, globalShortcut, clipboard, ipcMain, dialog, nativeImage, Notification } from 'electron';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
@@ -10,7 +10,8 @@ const DEFAULT_SETTINGS = {
     apiKey: '',
     preferences: {
         automaticClipboardSync: false,
-        notifications: true
+        notifications: true,
+        debugLogging: false  // Add this line
     },
     refreshIntervalSeconds: 60,
     apiBaseUrl: 'https://clipboard.cloudydestiny.com',
@@ -22,6 +23,30 @@ const DEFAULT_SETTINGS = {
         textColor: '#ffffff'
     }
 };
+
+// Replace the logDebug function
+function logDebug(message, ...args) {
+    const settings = getSettings();
+    if (settings.preferences.debugLogging) {
+        console.log(`[DEBUG] ${message}`, ...args);
+    }
+}
+
+// Add a new logInfo function
+function logInfo(message, ...args) {
+    console.log(`[INFO] ${message}`, ...args);
+}
+
+function showNotification(title, body) {
+    const settings = getSettings();
+    if (settings.preferences.notifications) {
+        new Notification({ 
+            title, 
+            body,
+            silent: false
+        }).show();
+    }
+}
 
 // Remove the schema constant and modify initStore
 const initStore = () => {
@@ -92,8 +117,9 @@ const setupIpcHandlers = () => {
         await cloudCopyFile(filePath);
     });
 
+    // Update the saveSettings IPC handler
     ipcMain.handle('saveSettings', async (event, newSettings) => {
-        console.log('[DEBUG] Saving new settings:', newSettings);
+        logDebug('Saving new settings:', newSettings);
         store.set(newSettings);
         setupRefreshInterval();
         return store.get();
@@ -141,13 +167,15 @@ const setupIpcHandlers = () => {
             }
             return false;
         } catch (error) {
-            console.error('Download failed:', error);
+            logDebug('Operation failed:', error);
+            showNotification('Error', error.message);
+            mainWindow?.webContents.send('clipboardError', error.message);
             throw error;
         }
     });
 
     ipcMain.handle('refreshMonitoring', () => {
-        console.log('[DEBUG] Handling refresh monitoring request');
+        logDebug('Handling refresh monitoring request');
         setupClipboardMonitoring();
     });
 };
@@ -191,7 +219,9 @@ const checkAndSyncClipboard = async () => {
             await cloudCopy();
         }
     } catch (error) {
-        console.error('Sync check failed:', error);
+        logDebug('Operation failed:', error);
+        showNotification('Error', error.message);
+        mainWindow?.webContents.send('clipboardError', error.message);
     }
 };
 
@@ -202,27 +232,26 @@ let lastClipboardContent = {
 };
 
 const setupClipboardMonitoring = () => {
-    // Add logging
-    console.log('[DEBUG] Setting up clipboard monitoring...');
+    // Update logging calls
+    logDebug('Setting up clipboard monitoring...');
     
     if (clipboardMonitoringInterval) {
-        console.log('[DEBUG] Clearing existing monitoring interval');
+        logDebug('Clearing existing monitoring interval');
         clearInterval(clipboardMonitoringInterval);
         clipboardMonitoringInterval = null;
     }
 
     const settings = getSettings();
-    console.log('[DEBUG] Current settings:', {
+    logDebug('Current settings:', {
         automaticClipboardSync: settings.preferences.automaticClipboardSync
     });
 
-    // Explicitly check boolean value
     if (settings.preferences.automaticClipboardSync !== true) {
-        console.log('[INFO] Automatic clipboard sync disabled');
+        logDebug('Automatic clipboard sync disabled');
         return;
     }
 
-    console.log('[INFO] Starting clipboard monitoring');
+    logDebug('Starting clipboard monitoring');
     clipboardMonitoringInterval = setInterval(() => {
         const currentText = clipboard.readText();
         const currentImage = clipboard.readImage();
@@ -299,8 +328,11 @@ const cloudCopy = async () => {
             });
             mainWindow.webContents.send('refreshClipboard');
             mainWindow?.webContents.send('triggerRefresh');
+            showNotification('Clipboard Synced', 'Text copied to cloud clipboard');
         } catch (error) {
-            console.error('Failed to copy text to cloud:', error);
+            logDebug('Operation failed:', error);
+            showNotification('Error', error.message);
+            mainWindow?.webContents.send('clipboardError', error.message);
         }
         return;
     }
@@ -323,7 +355,9 @@ const cloudCopy = async () => {
             }
         }
     } catch (error) {
-        console.error('Error reading file from clipboard:', error);
+        logDebug('Operation failed:', error);
+        showNotification('Error', error.message);
+        mainWindow?.webContents.send('clipboardError', error.message);
     }
 };
 
@@ -354,7 +388,8 @@ const cloudCopyFile = async (filePath) => {
         
         mainWindow?.webContents.send('refreshClipboard');
     } catch (error) {
-        console.error('Failed to copy file to cloud:', error);
+        logDebug('Operation failed:', error);
+        showNotification('Error', error.message);
         mainWindow?.webContents.send('clipboardError', error.message);
         throw error;
     }
@@ -377,6 +412,7 @@ const cloudPaste = async () => {
         if (response.data.type === 'text') {
             clipboard.writeText(response.data.content);
             mainWindow?.webContents.send('refreshClipboard');
+            showNotification('Clipboard Updated', 'New text content pasted from cloud');
             return;
         }
 
@@ -407,7 +443,8 @@ const cloudPaste = async () => {
 
         mainWindow?.webContents.send('refreshClipboard');
     } catch (error) {
-        console.error('Failed to retrieve from cloud:', error);
+        logDebug('Operation failed:', error);
+        showNotification('Error', error.message);
         mainWindow?.webContents.send('clipboardError', error.message);
     }
 };
@@ -422,7 +459,7 @@ async function handleLatestContent() {
         
         const filename = response.headers.get('content-disposition')
             ?.split('filename=')[1]?.replace(/"/g, '') || 'clipboard.txt';
-        console.log('Extracted filename:', filename); // Debug log
+        logDebug('Extracted filename:', filename); // Debug log
         
         const content = await response.text();
         document.getElementById('clipboardText').textContent = content;
@@ -431,19 +468,23 @@ async function handleLatestContent() {
         const downloadBtn = document.getElementById('downloadBtn');
         downloadBtn.onclick = () => handleFileDownload(filename);
     } catch (error) {
-        console.error('Error fetching content:', error);
+        logDebug('Operation failed:', error);
+        showNotification('Error', error.message);
+        mainWindow?.webContents.send('clipboardError', error.message);
     }
 }
 
 async function handleFileDownload(filename) {
     try {
-        console.log('Initiating download with filename:', filename); // Debug log
+        logDebug('Initiating download with filename:', filename); // Debug log
         const success = await window.electronAPI.downloadFile(filename);
         if (success) {
             document.getElementById('clipboardText').textContent = 'File downloaded successfully!';
         }
     } catch (error) {
-        console.error('Download failed:', error);
+        logDebug('Operation failed:', error);
+        showNotification('Error', error.message);
+        mainWindow?.webContents.send('clipboardError', error.message);
     }
 }
 
@@ -461,7 +502,9 @@ app.whenReady().then(async () => {
             if (BrowserWindow.getAllWindows().length === 0) createWindow();
         });
     } catch (error) {
-        console.error('Startup error:', error);
+        logDebug('Operation failed:', error);
+        showNotification('Error', error.message);
+        mainWindow?.webContents.send('clipboardError', error.message);
         app.quit();
     }
 });

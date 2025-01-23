@@ -132,6 +132,13 @@
                     <span class="tooltip">Display desktop notifications (Default: On)</span>
                 </label>
             </div>
+            <div class="preference-item">
+                <label>
+                    <input type="checkbox" id="debugLogging" onchange="savePreferences()">
+                    Debug Logging
+                    <span class="tooltip">Show detailed debug messages in console (Default: Off)</span>
+                </label>
+            </div>
         </div>
 
         <div class="setting-group">
@@ -208,23 +215,24 @@
                 settings.preferences.automaticClipboardSync;
             document.getElementById('notifications').checked = 
                 settings.preferences.notifications;
+            document.getElementById('debugLogging').checked = 
+                settings.preferences.debugLogging;
             document.getElementById('refreshInterval').value = 
                 settings.refreshIntervalSeconds;
         }
 
         async function savePreferences() {
             const settings = await ipcRenderer.invoke('getSettings');
-            // Create a copy of the settings to modify
             const newSettings = { ...settings };
             newSettings.preferences = {
                 automaticClipboardSync: 
                     document.getElementById('automaticClipboardSync').checked,
                 notifications: 
-                    document.getElementById('notifications').checked
+                    document.getElementById('notifications').checked,
+                debugLogging:
+                    document.getElementById('debugLogging').checked
             };
             await ipcRenderer.invoke('saveSettings', newSettings);
-            
-            // Force refresh of monitoring
             await ipcRenderer.invoke('refreshMonitoring');
         }
 
