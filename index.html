@@ -71,6 +71,8 @@
     <div class="header">
         <h1>Crossy Clipboard</h1>
         <button onclick="window.location.href='settings.html'">Settings</button>
+        <button id="updateButton">Update</button>
+        <div id="versionInfo"></div>
     </div>
 
     <div class="main-content">
@@ -185,6 +187,16 @@
 
         // Initial fetch on page load
         fetchClipboardContent();
+
+        // Add event listener for update button
+        document.getElementById('updateButton').addEventListener('click', () => {
+            ipcRenderer.send('checkForUpdates');
+        });
+
+        // Fetch and display version info
+        ipcRenderer.invoke('getVersionInfo').then(version => {
+            document.getElementById('versionInfo').textContent = `Version: ${version}`;
+        });
     </script>
 </body>
 </html>

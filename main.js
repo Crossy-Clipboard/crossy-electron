@@ -1,20 +1,21 @@
-// main.js
 import Store from 'electron-store';
 import { app, BrowserWindow, globalShortcut, clipboard, ipcMain, dialog, nativeImage, Notification } from 'electron';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
+import { autoUpdater } from 'electron-updater';
 
 const DEFAULT_SETTINGS = {
     apiKey: '',
     preferences: {
         automaticClipboardSync: false,
         notifications: true,
-        debugLogging: false  // Add this line
+        debugLogging: false,
+        automaticUpdates: true
     },
     refreshIntervalSeconds: 60,
-    apiBaseUrl: 'https://clipboard.cloudydestiny.com',
+    apiBaseUrl: 'https://crossyclip.com',
     theme: {
         primaryColor: '#6200ee',
         hoverColor: '#3700b3',
@@ -24,7 +25,6 @@ const DEFAULT_SETTINGS = {
     }
 };
 
-// Replace the logDebug function
 function logDebug(message, ...args) {
     const settings = getSettings();
     if (settings.preferences.debugLogging) {
@@ -32,7 +32,6 @@ function logDebug(message, ...args) {
     }
 }
 
-// Add a new logInfo function
 function logInfo(message, ...args) {
     console.log(`[INFO] ${message}`, ...args);
 }
@@ -48,20 +47,18 @@ function showNotification(title, body) {
     }
 }
 
-// Remove the schema constant and modify initStore
 const initStore = () => {
     return new Store({
         defaults: DEFAULT_SETTINGS
     });
 };
 
-// Make sure initStore is called before use
 const store = initStore();
 
 let mainWindow;
 let refreshInterval;
 let lastLocalClipboardTimestamp = Date.now();
-let clipboardMonitoringInterval; // Add this at the top with other global variables
+let clipboardMonitoringInterval;
 
 const getSettings = () => {
     const defaults = {
@@ -73,7 +70,6 @@ const getSettings = () => {
     
     const settings = store?.store || defaults;
     
-    // Ensure preferences exist with correct structure
     settings.preferences = {
         ...defaults.preferences,
         ...settings.preferences
@@ -117,15 +113,12 @@ const setupIpcHandlers = () => {
         await cloudCopyFile(filePath);
     });
 
-    // Update the saveSettings IPC handler
     ipcMain.handle('saveSettings', async (event, newSettings) => {
         logDebug('Saving new settings:', newSettings);
         store.set(newSettings);
         setupRefreshInterval();
         return store.get();
     });
-
-    // Add this to your existing IPC handlers in setupIpcHandlers()
 
     ipcMain.handle('saveFile', async (event, suggestedName) => {
         const result = await dialog.showSaveDialog(mainWindow, {
@@ -145,7 +138,6 @@ const setupIpcHandlers = () => {
                 responseType: 'arraybuffer'
             });
 
-            // Extract filename from Content-Disposition header as fallback
             const disposition = response.headers['content-disposition'];
             const suggestedName = filename || 
                 disposition?.match(/filename="?([^"]+)"?/)?.[1] || 
@@ -178,6 +170,14 @@ const setupIpcHandlers = () => {
         logDebug('Handling refresh monitoring request');
         setupClipboardMonitoring();
     });
+
+    ipcMain.on('checkForUpdates', () => {
+        autoUpdater.checkForUpdatesAndNotify();
+    });
+
+    ipcMain.handle('getVersionInfo', () => {
+        return app.getVersion();
+    });
 };
 
 const createWindow = () => {
@@ -191,7 +191,6 @@ const createWindow = () => {
         },
     });
 
-    // Load index.html by default
     mainWindow.loadFile('index.html');
 };
 
@@ -203,19 +202,15 @@ const checkAndSyncClipboard = async () => {
     if (!appKey) return;
 
     try {
-        // Get cloud clipboard timestamp
         const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
             headers: { AppKey: appKey }
         });
         
         const cloudTimestamp = parseInt(response.headers['x-clipboard-timestamp']);
         
-        // Compare timestamps and sync accordingly
         if (cloudTimestamp > lastLocalClipboardTimestamp) {
-            // Cloud is newer, update local
             await cloudPaste();
         } else if (lastLocalClipboardTimestamp > cloudTimestamp) {
-            // Local is newer, update cloud
             await cloudCopy();
         }
     } catch (error) {
@@ -232,7 +227,6 @@ let lastClipboardContent = {
 };
 
 const setupClipboardMonitoring = () => {
-    // Update logging calls
     logDebug('Setting up clipboard monitoring...');
     
     if (clipboardMonitoringInterval) {
@@ -256,14 +250,12 @@ const setupClipboardMonitoring = () => {
         const currentText = clipboard.readText();
         const currentImage = clipboard.readImage();
         
-        // Check for changes in text content
         if (currentText && currentText !== lastClipboardContent.text) {
             lastClipboardContent.text = currentText;
             lastLocalClipboardTimestamp = Date.now();
             cloudCopy();
         }
         
-        // Check for changes in image content
         if (!currentImage.isEmpty() && 
             currentImage.toDataURL() !== lastClipboardContent.image) {
             lastClipboardContent.image = currentImage.toDataURL();
@@ -271,7 +263,6 @@ const setupClipboardMonitoring = () => {
             cloudCopy();
         }
         
-        // Check for file paths in clipboard
         try {
             const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
             const filePaths = rawFilePaths
@@ -285,9 +276,8 @@ const setupClipboardMonitoring = () => {
                 cloudCopy();
             }
         } catch (error) {
-            // Ignore errors when no file paths are in clipboard
         }
-    }, 1000); // Poll every second
+    }, 1000);
 };
 
 function setupRefreshInterval() {
@@ -302,13 +292,11 @@ function setupRefreshInterval() {
     }, intervalMs);
 }
 
-// Update the cloudCopy function to properly handle file paths
 const cloudCopy = async () => {
     const appKey = getAppKey();
     const settings = getSettings();
     if (!appKey) return;
     
-    // Check if clipboard has an image
     const image = clipboard.readImage();
     if (!image.isEmpty()) {
         const tempPath = path.join(app.getPath('temp'), `clipboard-${Date.now()}.png`);
@@ -319,7 +307,6 @@ const cloudCopy = async () => {
         return;
     }
 
-    // Check for text content
     const text = clipboard.readText();
     if (text) {
         try {
@@ -337,13 +324,12 @@ const cloudCopy = async () => {
         return;
     }
 
-    // Check if clipboard has a file
     try {
         const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
         const filePaths = rawFilePaths
             .split('\0')
-            .filter(Boolean) // Remove empty strings
-            .map(fp => fp.replace(/\\/g, '\\')); // Normalize backslashes
+            .filter(Boolean)
+            .map(fp => fp.replace(/\\/g, '\\'));
         
         if (filePaths.length > 0) {
             const filePath = filePaths[0];
@@ -395,7 +381,6 @@ const cloudCopyFile = async (filePath) => {
     }
 };
 
-
 const cloudPaste = async () => {
     const appKey = getAppKey();
     const settings = getSettings();
@@ -404,11 +389,9 @@ const cloudPaste = async () => {
     try {
         const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
             headers: { AppKey: appKey },
-            // Don't use arraybuffer by default
             responseType: 'json'
         });
 
-        // Handle text content
         if (response.data.type === 'text') {
             clipboard.writeText(response.data.content);
             mainWindow?.webContents.send('refreshClipboard');
@@ -416,7 +399,6 @@ const cloudPaste = async () => {
             return;
         }
 
-        // For files/images, switch to arraybuffer
         const fileResponse = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
             headers: { AppKey: appKey },
             responseType: 'arraybuffer'
@@ -459,12 +441,11 @@ async function handleLatestContent() {
         
         const filename = response.headers.get('content-disposition')
             ?.split('filename=')[1]?.replace(/"/g, '') || 'clipboard.txt';
-        logDebug('Extracted filename:', filename); // Debug log
+        logDebug('Extracted filename:', filename);
         
         const content = await response.text();
         document.getElementById('clipboardText').textContent = content;
         
-        // Pass filename to download handler
         const downloadBtn = document.getElementById('downloadBtn');
         downloadBtn.onclick = () => handleFileDownload(filename);
     } catch (error) {
@@ -476,7 +457,7 @@ async function handleLatestContent() {
 
 async function handleFileDownload(filename) {
     try {
-        logDebug('Initiating download with filename:', filename); // Debug log
+        logDebug('Initiating download with filename:', filename);
         const success = await window.electronAPI.downloadFile(filename);
         if (success) {
             document.getElementById('clipboardText').textContent = 'File downloaded successfully!';
@@ -497,6 +478,19 @@ app.whenReady().then(async () => {
         setupClipboardMonitoring();
         globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
         globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
+
+        const settings = getSettings();
+        if (settings.preferences.automaticUpdates) {
+            autoUpdater.checkForUpdatesAndNotify();
+        }
+
+        autoUpdater.on('update-available', () => {
+            showNotification('Update Available', 'A new update is being downloaded.');
+        });
+
+        autoUpdater.on('update-downloaded', () => {
+            showNotification('Update Ready', 'A new update is ready to install. Restart the app to apply the update.');
+        });
 
         app.on('activate', () => {
             if (BrowserWindow.getAllWindows().length === 0) createWindow();
