@@ -87,6 +87,16 @@ const saveAppKey = (key) => {
     store?.set('apiKey', key);
 };
 
+const checkForUpdatesIfEnabled = async () => {
+    const settings = getSettings();
+    if (settings.preferences.automaticUpdates) {
+        logDebug('Checking for updates (auto-updates enabled)');
+        await autoUpdater.checkForUpdatesAndNotify();
+    } else {
+        logDebug('Auto-updates disabled - skipping update check');
+    }
+};
+
 const setupIpcHandlers = () => {
     ipcMain.on('saveApiKey', (event, key) => {
         saveAppKey(key);
@@ -118,6 +128,12 @@ const setupIpcHandlers = () => {
         logDebug('Saving new settings:', newSettings);
         store.set(newSettings);
         setupRefreshInterval();
+        
+        // Check for updates if the automaticUpdates setting was enabled
+        if (newSettings.preferences.automaticUpdates) {
+            await checkForUpdatesIfEnabled();
+        }
+        
         return store.get();
     });
 
@@ -181,6 +197,10 @@ const setupIpcHandlers = () => {
     });
 
     ipcMain.handle('checkForUpdates', async () => {
+        const settings = getSettings();
+        if (!settings.preferences.automaticUpdates) {
+            logDebug('Auto-updates disabled - manual check requested');
+        }
         const result = await autoUpdater.checkForUpdates();
         return result?.updateInfo?.version !== app.getVersion();
     });
@@ -494,17 +514,41 @@ app.whenReady().then(async () => {
         globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
         globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
 
-        const settings = getSettings();
-        if (settings.preferences.automaticUpdates) {
-            autoUpdater.checkForUpdatesAndNotify();
-        }
+        // Initial update check based on settings
+        await checkForUpdatesIfEnabled();
 
-        autoUpdater.on('update-available', () => {
-            showNotification('Update Available', 'A new update is being downloaded.');
+        // Setup auto-updater events
+        autoUpdater.on('checking-for-update', () => {
+            logDebug('Checking for updates...');
         });
 
-        autoUpdater.on('update-downloaded', () => {
-            showNotification('Update Ready', 'A new update is ready to install. Restart the app to apply the update.');
+        autoUpdater.on('update-available', (info) => {
+            logDebug('Update available:', info);
+            showNotification('Update Available', 'A new update is being downloaded.');
+            mainWindow?.webContents.send('updateAvailable', info);
+        });
+
+        autoUpdater.on('update-not-available', (info) => {
+            logDebug('Update not available:', info);
+        });
+
+        autoUpdater.on('download-progress', (progressObj) => {
+            logDebug('Download progress:', progressObj);
+        });
+
+        autoUpdater.on('update-downloaded', (info) => {
+            logDebug('Update downloaded:', info);
+            showNotification(
+                'Update Ready', 
+                'A new update is ready to install. Restart the app to apply the update.'
+            );
+            mainWindow?.webContents.send('updateDownloaded', info);
+        });
+
+        autoUpdater.on('error', (err) => {
+            logDebug('Update error:', err);
+            showNotification('Update Error', err.message);
+            mainWindow?.webContents.send('updateError', err.message);
         });
 
         app.on('activate', () => {
