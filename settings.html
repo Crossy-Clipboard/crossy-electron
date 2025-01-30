@@ -55,6 +55,10 @@
         button:hover {
             background-color: var(--hover-color);
         }
+        button:disabled {
+            background-color: #666666;
+            cursor: not-allowed;
+        }
         input {
             padding: 8px;
             margin-right: 10px;
@@ -156,6 +160,16 @@
                 <span class="tooltip">How often to check for new clipboard content (Default: 60 seconds)</span>
             </div>
         </div>
+
+        <div class="setting-group">
+            <h2>Updates</h2>
+            <div>
+                <p>Current version: <span id="currentVersion"></span></p>
+                <p>Latest version: <span id="latestVersion">Checking...</span></p>
+                <button id="updateButton" disabled>Update</button>
+                <span class="tooltip">Update to the latest version of Crossy Clipboard</span>
+            </div>
+        </div>
     </div>
     <script>
         const { ipcRenderer } = require('electron');
@@ -251,9 +265,35 @@
         window.addEventListener('DOMContentLoaded', async () => {
             await loadSettings();
             await loadPreferences();
+            await setupUpdateCheck(); // Add this line
         });
 
         window.addEventListener('DOMContentLoaded', loadCurrentSettings);
+
+        async function setupUpdateCheck() {
+            // Get current version
+            const currentVersion = await ipcRenderer.invoke('getVersionInfo');
+            document.getElementById('currentVersion').textContent = currentVersion;
+
+            // Check for updates
+            const updateAvailable = await ipcRenderer.invoke('checkForUpdates');
+            const latestVersion = await ipcRenderer.invoke('getLatestVersion');
+            
+            document.getElementById('latestVersion').textContent = latestVersion || 'Unknown';
+            const updateButton = document.getElementById('updateButton');
+            
+            updateButton.disabled = !updateAvailable;
+            if (updateAvailable) {
+                updateButton.textContent = 'Update Available';
+            } else {
+                updateButton.textContent = 'Up to Date';
+            }
+        }
+
+        // Add update button handler
+        document.getElementById('updateButton').addEventListener('click', () => {
+            ipcRenderer.send('startUpdate');
+        });
     </script>
 </body>
 </html>

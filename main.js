@@ -4,7 +4,8 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
-import { autoUpdater } from 'electron-updater';
+import pkg from 'electron-updater';
+const { autoUpdater } = pkg;
 
 const DEFAULT_SETTINGS = {
     apiKey: '',
@@ -177,6 +178,20 @@ const setupIpcHandlers = () => {
 
     ipcMain.handle('getVersionInfo', () => {
         return app.getVersion();
+    });
+
+    ipcMain.handle('checkForUpdates', async () => {
+        const result = await autoUpdater.checkForUpdates();
+        return result?.updateInfo?.version !== app.getVersion();
+    });
+
+    ipcMain.handle('getLatestVersion', async () => {
+        const result = await autoUpdater.checkForUpdates();
+        return result?.updateInfo?.version;
+    });
+
+    ipcMain.on('startUpdate', () => {
+        autoUpdater.downloadUpdate();
     });
 };
 
