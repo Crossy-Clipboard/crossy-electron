@@ -1,0 +1,150 @@
+:root {
+    --primary-color: #6200ee;
+    --hover-color: #3700b3;
+    --bg-color: #121212;
+    --surface-color: #1e1e1e;
+    --text-color: #ffffff;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.header {
+    background-color: var(--surface-color);
+    padding: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.header h1 {
+    margin: 0;
+}
+
+button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    background-color: var(--primary-color);
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    background-color: var(--hover-color);
+}
+
+button:disabled {
+    background-color: #666666;
+    cursor: not-allowed;
+}
+
+#saveButton {
+    padding: 8px 20px;
+    font-size: 16px;
+    margin-top: 10px;
+}
+
+#backButton {
+    padding: 8px 20px;
+    font-size: 14px;
+}
+
+#copyButton {
+    padding: 10px 20px;
+    font-size: 16px;
+    margin-top: 10px;
+}
+
+.settings-container {
+    padding: 20px;
+}
+
+.setting-group {
+    background-color: var(--surface-color);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    margin-bottom: 20px;
+}
+
+.setting-group h2 {
+    margin-top: 0;
+}
+
+input {
+    padding: 8px;
+    margin-right: 10px;
+    width: 300px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--text-color);
+    border-radius: 4px;
+}
+
+.current-key {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    padding: 10px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.api-key {
+    font-family: monospace;
+    letter-spacing: 2px;
+}
+
+.main-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.clipboard-content {
+    width: 80%;
+    max-width: 600px;
+    background-color: var(--surface-color);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    text-align: center;
+}
+
+#clipboardText {
+    margin: 20px 0;
+    word-break: break-word;
+}
+
+.tooltip {
+    display: none;
+    position: absolute;
+    background: rgba(0,0,0,0.8);
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    max-width: 200px;
+    z-index: 100;
+}
+
+.preference-item:hover .tooltip,
+.setting-group div:hover .tooltip {
+    display: block;
+}
+
+.preference-item {
+    position: relative;
+    margin: 10px 0;
+}
