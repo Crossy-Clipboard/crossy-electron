@@ -21,7 +21,7 @@
                 <p id="clipboardType"></p>
                 <p id="clipboardText">Loading clipboard content...</p>
             </div>
-            <button onclick="fetchClipboardContent()">Refresh</button>
+            <button onclick="fetchClipboardContent(); createNotification('Clipboard Refreshed', 'Clipboard content have been updated.');">Refresh</button>
             <div style="margin-top: 20px;">
                 <button id="downloadButton" style="display: none;" onclick="handleFileDownload()">Download to...</button>
             </div>

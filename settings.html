@@ -37,8 +37,8 @@
             <div class="preference-item">
                 <label>
                     <input type="checkbox" id="notifications" onchange="savePreferences()">
-                    Show Notifications
-                    <span class="tooltip">Display desktop notifications (Default: On)</span>
+                    System Notifications
+                    <span class="tooltip">Use system notifications (Default: Off)</span>
                 </label>
             </div>
             <div class="preference-item">
@@ -147,7 +147,7 @@
             const settings = await ipcRenderer.invoke('getSettings');
             settings.refreshIntervalSeconds = interval;
             await ipcRenderer.invoke('saveSettings', settings);
-            window.location.reload();
+            // createNotification('Refresh Interval Updated', `Set to ${interval} seconds`);
         }
 
         // Add preference loading/saving
@@ -230,10 +230,7 @@
             const copyInput = document.getElementById('copyKeybinding');
             const pasteInput = document.getElementById('pasteKeybinding');
             
-            // Get current keybindings
             const currentBindings = await ipcRenderer.invoke('getCustomKeybindings');
-            
-            // Only update if input has a value
             const keybindings = {
                 copy: copyInput.value || currentBindings.copy,
                 paste: pasteInput.value || currentBindings.paste

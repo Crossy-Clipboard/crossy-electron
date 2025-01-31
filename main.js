@@ -41,7 +41,7 @@ function logInfo(message, ...args) {
     console.log(`[INFO] ${message}`, ...args);
 }
 
-// Update the showNotification function
+// Add to existing showNotification function
 function showNotification(title, body) {
     const settings = getSettings();
     if (settings.preferences.notifications) {
@@ -51,10 +51,9 @@ function showNotification(title, body) {
             body,
             silent: false
         }).show();
-    } else {
-        // Use in-app notification
-        mainWindow?.webContents.send('showInAppNotification', { title, body });
     }
+    // Always send in-app notification
+    mainWindow?.webContents.send('showInAppNotification', { title, body });
 }
 
 const initStore = () => {
@@ -137,13 +136,13 @@ const setupIpcHandlers = () => {
         logDebug('Saving new settings:', newSettings);
         store.set(newSettings);
         setupRefreshInterval();
-        registerCustomKeybindings(); // Register custom keybindings after saving settings
+        registerCustomKeybindings();
         
-        // Check for updates if the automaticUpdates setting was enabled
+        showNotification('Settings Saved', 'Your settings have been updated successfully');
+        
         if (newSettings.preferences.automaticUpdates) {
             await checkForUpdatesIfEnabled();
         }
-        
         return store.get();
     });
 
@@ -229,6 +228,8 @@ const setupIpcHandlers = () => {
         settings.keybindings = keybindings;
         store.set(settings);
         registerCustomKeybindings();
+        showNotification('Keybindings Saved', 'Custom keybindings have been updated');
+        return settings.keybindings;
     });
 
     ipcMain.handle('getCustomKeybindings', () => {
@@ -555,7 +556,10 @@ app.whenReady().then(async () => {
 
         autoUpdater.on('update-available', (info) => {
             logDebug('Update available:', info);
-            showNotification('Update Available', 'A new update is being downloaded.');
+            showNotification(
+                'Update Available', 
+                `Version ${info.version} is available for download`
+            );
             mainWindow?.webContents.send('updateAvailable', info);
         });
 
