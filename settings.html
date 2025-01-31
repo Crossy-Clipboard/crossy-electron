@@ -67,6 +67,19 @@
         </div>
 
         <div class="setting-group">
+            <h2>Custom Keybindings</h2>
+            <div>
+                <label for="copyKeybinding">Copy Keybinding:</label>
+                <input type="text" id="copyKeybinding" placeholder="Enter copy keybinding">
+            </div>
+            <div>
+                <label for="pasteKeybinding">Paste Keybinding:</label>
+                <input type="text" id="pasteKeybinding" placeholder="Enter paste keybinding">
+            </div>
+            <button onclick="saveKeybindings()">Save Keybindings</button>
+        </div>
+
+        <div class="setting-group">
             <h2>Updates</h2>
             <div>
                 <p>Current version: <span id="currentVersion"></span></p>
@@ -171,6 +184,7 @@
             await loadSettings();
             await loadPreferences();
             await setupUpdateCheck(); // Add this line
+            await loadKeybindings(); // Add this line
         });
 
         window.addEventListener('DOMContentLoaded', loadCurrentSettings);
@@ -199,6 +213,22 @@
         document.getElementById('updateButton').addEventListener('click', () => {
             ipcRenderer.send('startUpdate');
         });
+
+        // Add function to load custom keybindings
+        async function loadKeybindings() {
+            const settings = await ipcRenderer.invoke('getSettings');
+            document.getElementById('copyKeybinding').value = settings.keybindings.copy;
+            document.getElementById('pasteKeybinding').value = settings.keybindings.paste;
+        }
+
+        // Add function to save custom keybindings
+        async function saveKeybindings() {
+            const copyKeybinding = document.getElementById('copyKeybinding').value;
+            const pasteKeybinding = document.getElementById('pasteKeybinding').value;
+            const keybindings = { copy: copyKeybinding, paste: pasteKeybinding };
+            await ipcRenderer.invoke('saveCustomKeybindings', keybindings);
+            alert('Keybindings saved successfully!');
+        }
     </script>
 </body>
 </html>

@@ -23,6 +23,10 @@ const DEFAULT_SETTINGS = {
         bgColor: '#121212',
         surfaceColor: '#1e1e1e',
         textColor: '#ffffff'
+    },
+    keybindings: {
+        copy: 'CommandOrControl+Shift+C',
+        paste: 'CommandOrControl+Shift+V'
     }
 };
 
@@ -128,6 +132,7 @@ const setupIpcHandlers = () => {
         logDebug('Saving new settings:', newSettings);
         store.set(newSettings);
         setupRefreshInterval();
+        registerCustomKeybindings(); // Register custom keybindings after saving settings
         
         // Check for updates if the automaticUpdates setting was enabled
         if (newSettings.preferences.automaticUpdates) {
@@ -212,6 +217,13 @@ const setupIpcHandlers = () => {
 
     ipcMain.on('startUpdate', () => {
         autoUpdater.downloadUpdate();
+    });
+
+    ipcMain.handle('saveCustomKeybindings', (event, keybindings) => {
+        const settings = getSettings();
+        settings.keybindings = keybindings;
+        store.set(settings);
+        registerCustomKeybindings();
     });
 };
 
@@ -504,6 +516,16 @@ async function handleFileDownload(filename) {
     }
 }
 
+const registerCustomKeybindings = () => {
+    const settings = getSettings();
+    const keybindings = settings.keybindings;
+
+    globalShortcut.unregisterAll();
+
+    globalShortcut.register(keybindings.copy, cloudCopy);
+    globalShortcut.register(keybindings.paste, cloudPaste);
+};
+
 app.whenReady().then(async () => {
     try {
         await initStore();
@@ -511,8 +533,7 @@ app.whenReady().then(async () => {
         setupIpcHandlers();
         setupRefreshInterval();
         setupClipboardMonitoring();
-        globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
-        globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
+        registerCustomKeybindings(); // Register custom keybindings on app ready
 
         // Initial update check based on settings
         await checkForUpdatesIfEnabled();
