@@ -587,6 +587,40 @@ const setupAutoUpdater = () => {
         }
         mainWindow?.webContents.send('updateError', error.message);
     });
+
+    // Add download update handler
+    ipcMain.on('startUpdate', () => {
+        logDebug('Starting update download...');
+        try {
+            showNotification('Update', 'Starting download...');
+            autoUpdater.downloadUpdate().catch(err => {
+                logDebug('Download failed:', err);
+                showNotification('Update Error', 'Failed to download update.');
+                mainWindow?.webContents.send('updateError', err.message);
+            });
+        } catch (error) {
+            logDebug('Download start failed:', error);
+            showNotification('Update Error', 'Could not start download.');
+            mainWindow?.webContents.send('updateError', error.message);
+        }
+    });
+
+    // Add download progress handler
+    autoUpdater.on('download-progress', (progressObj) => {
+        const progress = Math.round(progressObj.percent);
+        logDebug(`Download progress: ${progress}%`);
+        mainWindow?.webContents.send('updateProgress', progress);
+    });
+
+    // Add download completion handler 
+    autoUpdater.on('update-downloaded', (info) => {
+        logDebug('Update downloaded:', info);
+        showNotification(
+            'Update Ready',
+            'Update downloaded. Restart to install.'
+        );
+        mainWindow?.webContents.send('updateDownloaded', info);
+    });
 };
 
 const registerCustomKeybindings = () => {
