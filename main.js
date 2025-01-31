@@ -11,7 +11,7 @@ const DEFAULT_SETTINGS = {
     apiKey: '',
     preferences: {
         automaticClipboardSync: false,
-        notifications: true,
+        notifications: false, // Changed to false
         debugLogging: false,
         automaticUpdates: true
     },
@@ -23,6 +23,10 @@ const DEFAULT_SETTINGS = {
         bgColor: '#121212',
         surfaceColor: '#1e1e1e',
         textColor: '#ffffff'
+    },
+    keybindings: {
+        copy: 'CommandOrControl+Shift+C',
+        paste: 'CommandOrControl+Shift+V'
     }
 };
 
@@ -37,15 +41,19 @@ function logInfo(message, ...args) {
     console.log(`[INFO] ${message}`, ...args);
 }
 
+// Add to existing showNotification function
 function showNotification(title, body) {
     const settings = getSettings();
     if (settings.preferences.notifications) {
+        // Use system notification
         new Notification({ 
             title, 
             body,
             silent: false
         }).show();
     }
+    // Always send in-app notification
+    mainWindow?.webContents.send('showInAppNotification', { title, body });
 }
 
 const initStore = () => {
@@ -142,12 +150,13 @@ const setupIpcHandlers = () => {
         logDebug('Saving new settings:', newSettings);
         store.set(newSettings);
         setupRefreshInterval();
+        registerCustomKeybindings();
         
-        // Check for updates if the automaticUpdates setting was enabled
+        showNotification('Settings Saved', 'Your settings have been updated successfully');
+        
         if (newSettings.preferences.automaticUpdates) {
             await checkForUpdatesIfEnabled();
         }
-        
         return store.get();
     });
 
@@ -243,6 +252,20 @@ const setupIpcHandlers = () => {
 
     ipcMain.on('startUpdate', () => {
         autoUpdater.downloadUpdate();
+    });
+
+    ipcMain.handle('saveCustomKeybindings', (event, keybindings) => {
+        const settings = getSettings();
+        settings.keybindings = keybindings;
+        store.set(settings);
+        registerCustomKeybindings();
+        showNotification('Keybindings Saved', 'Custom keybindings have been updated');
+        return settings.keybindings;
+    });
+
+    ipcMain.handle('getCustomKeybindings', () => {
+        const settings = getSettings();
+        return settings.keybindings;
     });
 };
 
@@ -564,8 +587,16 @@ const setupAutoUpdater = () => {
         }
         mainWindow?.webContents.send('updateError', error.message);
     });
+};
 
-    // ... other existing auto-updater events ...
+const registerCustomKeybindings = () => {
+    const settings = getSettings();
+    const keybindings = settings.keybindings;
+
+    globalShortcut.unregisterAll();
+
+    globalShortcut.register(keybindings.copy, cloudCopy);
+    globalShortcut.register(keybindings.paste, cloudPaste);
 };
 
 app.whenReady().then(async () => {
@@ -578,6 +609,7 @@ app.whenReady().then(async () => {
         setupAutoUpdater(); // Add this line
         globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
         globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
+        registerCustomKeybindings(); // Register custom keybindings on app ready
 
         // Initial update check with error handling
         try {
@@ -594,7 +626,10 @@ app.whenReady().then(async () => {
 
         autoUpdater.on('update-available', (info) => {
             logDebug('Update available:', info);
-            showNotification('Update Available', 'A new update is being downloaded.');
+            showNotification(
+                'Update Available', 
+                `Version ${info.version} is available for download`
+            );
             mainWindow?.webContents.send('updateAvailable', info);
         });
 

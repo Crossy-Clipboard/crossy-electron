@@ -37,8 +37,8 @@
             <div class="preference-item">
                 <label>
                     <input type="checkbox" id="notifications" onchange="savePreferences()">
-                    Show Notifications
-                    <span class="tooltip">Display desktop notifications (Default: On)</span>
+                    System Notifications
+                    <span class="tooltip">Use system notifications (Default: Off)</span>
                 </label>
             </div>
             <div class="preference-item">
@@ -67,6 +67,21 @@
         </div>
 
         <div class="setting-group">
+            <h2>Custom Keybindings</h2>
+            <div class="preference-item">
+                <label for="copyKeybinding">Copy Keybinding:</label>
+                <input type="text" id="copyKeybinding" placeholder="Click to record shortcut" readonly>
+                <span class="tooltip">Press desired keys to set the copy shortcut</span>
+            </div>
+            <div class="preference-item">
+                <label for="pasteKeybinding">Paste Keybinding:</label>
+                <input type="text" id="pasteKeybinding" placeholder="Click to record shortcut" readonly>
+                <span class="tooltip">Press desired keys to set the paste shortcut</span>
+            </div>
+            <button onclick="saveKeybindings()">Save Keybindings</button>
+        </div>
+
+        <div class="setting-group">
             <h2>Updates</h2>
             <div>
                 <p>Current version: <span id="currentVersion"></span></p>
@@ -76,6 +91,7 @@
             </div>
         </div>
     </div>
+    <div class="notification-container" id="notificationContainer"></div>
     <script>
         const { ipcRenderer } = require('electron');
         
@@ -131,7 +147,7 @@
             const settings = await ipcRenderer.invoke('getSettings');
             settings.refreshIntervalSeconds = interval;
             await ipcRenderer.invoke('saveSettings', settings);
-            window.location.reload();
+            // createNotification('Refresh Interval Updated', `Set to ${interval} seconds`);
         }
 
         // Add preference loading/saving
@@ -171,6 +187,8 @@
             await loadSettings();
             await loadPreferences();
             await setupUpdateCheck(); // Add this line
+            await loadKeybindings(); // Add this line
+            setupKeybindingRecorder(); // Add this line
         });
 
         window.addEventListener('DOMContentLoaded', loadCurrentSettings);
@@ -198,6 +216,106 @@
         // Add update button handler
         document.getElementById('updateButton').addEventListener('click', () => {
             ipcRenderer.send('startUpdate');
+        });
+
+        // Add function to load custom keybindings
+        async function loadKeybindings() {
+            const settings = await ipcRenderer.invoke('getSettings');
+            document.getElementById('copyKeybinding').value = settings.keybindings.copy;
+            document.getElementById('pasteKeybinding').value = settings.keybindings.paste;
+        }
+
+        // Add function to save custom keybindings
+        async function saveKeybindings() {
+            const copyInput = document.getElementById('copyKeybinding');
+            const pasteInput = document.getElementById('pasteKeybinding');
+            
+            const currentBindings = await ipcRenderer.invoke('getCustomKeybindings');
+            const keybindings = {
+                copy: copyInput.value || currentBindings.copy,
+                paste: pasteInput.value || currentBindings.paste
+            };
+            
+            await ipcRenderer.invoke('saveCustomKeybindings', keybindings);
+        }
+
+        let activeInput = null; // Track which input is recording
+
+        function setupKeybindingRecorder() {
+            const copyInput = document.getElementById('copyKeybinding');
+            const pasteInput = document.getElementById('pasteKeybinding');
+            
+            function handleKeyRecording(event, input) {
+                if (input !== activeInput) return;
+                event.preventDefault();
+                
+                const modifiers = [];
+                if (event.ctrlKey) modifiers.push('Ctrl');
+                if (event.shiftKey) modifiers.push('Shift');
+                if (event.altKey) modifiers.push('Alt');
+                if (event.metaKey) modifiers.push('Cmd');
+                
+                let key = event.key;
+                if (key === ' ') key = 'Space';
+                if (key.length === 1) key = key.toUpperCase();
+                if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') return;
+                
+                const keyBinding = [...modifiers, key].join('+');
+                input.value = keyBinding;
+                
+                activeInput = null;
+                input.blur();
+            }
+
+            function handleFocus(input) {
+                activeInput = input;
+                input.value = '';
+                input.placeholder = 'Recording...';
+            }
+
+            function handleBlur(input) {
+                if (activeInput === input) {
+                    activeInput = null;
+                }
+                input.placeholder = 'Click to record shortcut';
+            }
+            
+            copyInput.addEventListener('keydown', (e) => handleKeyRecording(e, copyInput));
+            pasteInput.addEventListener('keydown', (e) => handleKeyRecording(e, pasteInput));
+            
+            copyInput.addEventListener('focus', () => handleFocus(copyInput));
+            pasteInput.addEventListener('focus', () => handleFocus(pasteInput));
+            
+            copyInput.addEventListener('blur', () => handleBlur(copyInput));
+            pasteInput.addEventListener('blur', () => handleBlur(pasteInput));
+        }
+
+        // Notification management
+        function createNotification(title, body) {
+            const container = document.getElementById('notificationContainer');
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.innerHTML = `
+                <div>
+                    <strong>${title}</strong>
+                    <p style="margin: 5px 0 0 0">${body}</p>
+                </div>
+            `;
+
+            container.appendChild(notification);
+
+            // Remove notification after 5 seconds
+            setTimeout(() => {
+                notification.classList.add('fade-out');
+                setTimeout(() => {
+                    container.removeChild(notification);
+                }, 300);
+            }, 5000);
+        }
+
+        // Listen for notification events from main process
+        ipcRenderer.on('showInAppNotification', (event, { title, body }) => {
+            createNotification(title, body);
         });
     </script>
 </body>

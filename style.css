@@ -92,6 +92,16 @@ input {
     border-radius: 4px;
 }
 
+input[readonly] {
+    background-color: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+}
+
+input[readonly]:focus {
+    background-color: rgba(255, 255, 255, 0.2);
+    outline: 2px solid var(--primary-color);
+}
+
 .current-key {
     margin-top: 10px;
     margin-bottom: 10px;
@@ -147,4 +157,52 @@ input {
 .preference-item {
     position: relative;
     margin: 10px 0;
+}
+
+/* Add at the end of the file */
+.notification-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.notification {
+    background-color: var(--surface-color);
+    color: var(--text-color);
+    padding: 12px 24px;
+    margin-top: 10px;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    animation: slideIn 0.3s ease-out;
+    min-width: 250px;
+    max-width: 400px;
+}
+
+.notification.fade-out {
+    animation: fadeOut 0.3s ease-out forwards;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
 }
