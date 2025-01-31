@@ -225,6 +225,11 @@ const setupIpcHandlers = () => {
         store.set(settings);
         registerCustomKeybindings();
     });
+
+    ipcMain.handle('getCustomKeybindings', () => {
+        const settings = getSettings();
+        return settings.keybindings;
+    });
 };
 
 const createWindow = () => {
