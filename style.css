@@ -92,6 +92,16 @@ input {
     border-radius: 4px;
 }
 
+input[readonly] {
+    background-color: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+}
+
+input[readonly]:focus {
+    background-color: rgba(255, 255, 255, 0.2);
+    outline: 2px solid var(--primary-color);
+}
+
 .current-key {
     margin-top: 10px;
     margin-bottom: 10px;

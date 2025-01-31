@@ -68,13 +68,15 @@
 
         <div class="setting-group">
             <h2>Custom Keybindings</h2>
-            <div>
+            <div class="preference-item">
                 <label for="copyKeybinding">Copy Keybinding:</label>
-                <input type="text" id="copyKeybinding" placeholder="Enter copy keybinding">
+                <input type="text" id="copyKeybinding" placeholder="Click to record shortcut" readonly>
+                <span class="tooltip">Press desired keys to set the copy shortcut</span>
             </div>
-            <div>
+            <div class="preference-item">
                 <label for="pasteKeybinding">Paste Keybinding:</label>
-                <input type="text" id="pasteKeybinding" placeholder="Enter paste keybinding">
+                <input type="text" id="pasteKeybinding" placeholder="Click to record shortcut" readonly>
+                <span class="tooltip">Press desired keys to set the paste shortcut</span>
             </div>
             <button onclick="saveKeybindings()">Save Keybindings</button>
         </div>
@@ -185,6 +187,7 @@
             await loadPreferences();
             await setupUpdateCheck(); // Add this line
             await loadKeybindings(); // Add this line
+            setupKeybindingRecorder(); // Add this line
         });
 
         window.addEventListener('DOMContentLoaded', loadCurrentSettings);
@@ -227,7 +230,52 @@
             const pasteKeybinding = document.getElementById('pasteKeybinding').value;
             const keybindings = { copy: copyKeybinding, paste: pasteKeybinding };
             await ipcRenderer.invoke('saveCustomKeybindings', keybindings);
-            alert('Keybindings saved successfully!');
+        }
+
+        function setupKeybindingRecorder() {
+            const copyInput = document.getElementById('copyKeybinding');
+            const pasteInput = document.getElementById('pasteKeybinding');
+            
+            function handleKeyRecording(event, input) {
+                event.preventDefault();
+                
+                const modifiers = [];
+                if (event.ctrlKey) modifiers.push('Ctrl');
+                if (event.shiftKey) modifiers.push('Shift');
+                if (event.altKey) modifiers.push('Alt');
+                if (event.metaKey) modifiers.push('Cmd');
+                
+                let key = event.key;
+                if (key === ' ') key = 'Space';
+                if (key.length === 1) key = key.toUpperCase();
+                if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') return;
+                
+                const keyBinding = [...modifiers, key].join('+');
+                input.value = keyBinding;
+                
+                input.blur();
+            }
+            
+            copyInput.addEventListener('keydown', (e) => handleKeyRecording(e, copyInput));
+            pasteInput.addEventListener('keydown', (e) => handleKeyRecording(e, pasteInput));
+            
+            copyInput.addEventListener('focus', () => {
+                copyInput.value = '';
+                copyInput.placeholder = 'Recording...';
+            });
+            
+            pasteInput.addEventListener('focus', () => {
+                pasteInput.value = '';
+                pasteInput.placeholder = 'Recording...';
+            });
+            
+            copyInput.addEventListener('blur', () => {
+                copyInput.placeholder = 'Click to record shortcut';
+            });
+            
+            pasteInput.addEventListener('blur', () => {
+                pasteInput.placeholder = 'Click to record shortcut';
+            });
         }
     </script>
 </body>
