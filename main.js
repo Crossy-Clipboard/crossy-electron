@@ -11,7 +11,7 @@ const DEFAULT_SETTINGS = {
     apiKey: '',
     preferences: {
         automaticClipboardSync: false,
-        notifications: true,
+        notifications: false, // Changed to false
         debugLogging: false,
         automaticUpdates: true
     },
@@ -41,14 +41,19 @@ function logInfo(message, ...args) {
     console.log(`[INFO] ${message}`, ...args);
 }
 
+// Update the showNotification function
 function showNotification(title, body) {
     const settings = getSettings();
     if (settings.preferences.notifications) {
+        // Use system notification
         new Notification({ 
             title, 
             body,
             silent: false
         }).show();
+    } else {
+        // Use in-app notification
+        mainWindow?.webContents.send('showInAppNotification', { title, body });
     }
 }
 

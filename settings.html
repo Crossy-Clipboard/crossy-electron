@@ -91,6 +91,7 @@
             </div>
         </div>
     </div>
+    <div class="notification-container" id="notificationContainer"></div>
     <script>
         const { ipcRenderer } = require('electron');
         
@@ -291,6 +292,34 @@
             copyInput.addEventListener('blur', () => handleBlur(copyInput));
             pasteInput.addEventListener('blur', () => handleBlur(pasteInput));
         }
+
+        // Notification management
+        function createNotification(title, body) {
+            const container = document.getElementById('notificationContainer');
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.innerHTML = `
+                <div>
+                    <strong>${title}</strong>
+                    <p style="margin: 5px 0 0 0">${body}</p>
+                </div>
+            `;
+
+            container.appendChild(notification);
+
+            // Remove notification after 5 seconds
+            setTimeout(() => {
+                notification.classList.add('fade-out');
+                setTimeout(() => {
+                    container.removeChild(notification);
+                }, 300);
+            }, 5000);
+        }
+
+        // Listen for notification events from main process
+        ipcRenderer.on('showInAppNotification', (event, { title, body }) => {
+            createNotification(title, body);
+        });
     </script>
 </body>
 </html>
