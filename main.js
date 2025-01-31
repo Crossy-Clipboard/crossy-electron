@@ -91,10 +91,24 @@ const checkForUpdatesIfEnabled = async () => {
     const settings = getSettings();
     if (settings.preferences.automaticUpdates) {
         logDebug('Checking for updates (auto-updates enabled)');
-        await autoUpdater.checkForUpdatesAndNotify();
+        try {
+            await autoUpdater.checkForUpdatesAndNotify();
+        } catch (error) {
+            logDebug('Auto-update check failed:', error);
+            // Don't show notification for 404 errors since they're expected when no update exists
+            if (!error.message.includes('404')) {
+                showNotification(
+                    'Update Check Failed', 
+                    'Could not check for updates. Will try again later.'
+                );
+            }
+            // Don't crash the app, just log the error
+            return false;
+        }
     } else {
         logDebug('Auto-updates disabled - skipping update check');
     }
+    return true;
 };
 
 const setupIpcHandlers = () => {
@@ -201,13 +215,30 @@ const setupIpcHandlers = () => {
         if (!settings.preferences.automaticUpdates) {
             logDebug('Auto-updates disabled - manual check requested');
         }
-        const result = await autoUpdater.checkForUpdates();
-        return result?.updateInfo?.version !== app.getVersion();
+        try {
+            const result = await autoUpdater.checkForUpdates();
+            return result?.updateInfo?.version !== app.getVersion();
+        } catch (error) {
+            logDebug('Update check failed:', error);
+            // Don't show notification for 404 errors
+            if (!error.message.includes('404')) {
+                showNotification(
+                    'Update Check Failed', 
+                    'Could not check for updates. Please try again later.'
+                );
+            }
+            return false;
+        }
     });
 
     ipcMain.handle('getLatestVersion', async () => {
-        const result = await autoUpdater.checkForUpdates();
-        return result?.updateInfo?.version;
+        try {
+            const result = await autoUpdater.checkForUpdates();
+            return result?.updateInfo?.version;
+        } catch (error) {
+            logDebug('Failed to get latest version:', error);
+            return app.getVersion(); // Return current version if check fails
+        }
     });
 
     ipcMain.on('startUpdate', () => {
@@ -504,6 +535,39 @@ async function handleFileDownload(filename) {
     }
 }
 
+const setupAutoUpdater = () => {
+    autoUpdater.logger = {
+        info: (msg) => logDebug('Update info:', msg),
+        warn: (msg) => logDebug('Update warning:', msg),
+        error: (msg) => logDebug('Update error:', msg)
+    };
+
+    // Add error handling for the feed URL
+    try {
+        autoUpdater.setFeedURL({
+            provider: 'github',
+            owner: 'Crossy-Clipboard',
+            repo: 'crossy-electron'
+        });
+    } catch (error) {
+        logDebug('Failed to set update feed URL:', error);
+    }
+
+    autoUpdater.on('error', (error) => {
+        logDebug('Update error:', error);
+        // Only show notification for non-404 errors
+        if (!error.message.includes('404')) {
+            showNotification(
+                'Update Error', 
+                'There was a problem checking for updates.'
+            );
+        }
+        mainWindow?.webContents.send('updateError', error.message);
+    });
+
+    // ... other existing auto-updater events ...
+};
+
 app.whenReady().then(async () => {
     try {
         await initStore();
@@ -511,11 +575,17 @@ app.whenReady().then(async () => {
         setupIpcHandlers();
         setupRefreshInterval();
         setupClipboardMonitoring();
+        setupAutoUpdater(); // Add this line
         globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
         globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
 
-        // Initial update check based on settings
-        await checkForUpdatesIfEnabled();
+        // Initial update check with error handling
+        try {
+            await checkForUpdatesIfEnabled();
+        } catch (error) {
+            logDebug('Initial update check failed:', error);
+            // Don't crash the app, continue running
+        }
 
         // Setup auto-updater events
         autoUpdater.on('checking-for-update', () => {
