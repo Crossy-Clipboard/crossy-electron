@@ -267,6 +267,16 @@ const setupIpcHandlers = () => {
         const settings = getSettings();
         return settings.keybindings;
     });
+
+    ipcMain.on('manualRefresh', async () => {
+        try {
+            await cloudPaste();
+        } catch (error) {
+            logDebug('Manual refresh failed:', error);
+            showNotification('Error', error.message);
+            mainWindow?.webContents.send('clipboardError', error.message);
+        }
+    });
 };
 
 const createWindow = () => {

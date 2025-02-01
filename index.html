@@ -21,7 +21,7 @@
                 <p id="clipboardType"></p>
                 <p id="clipboardText">Loading clipboard content...</p>
             </div>
-            <button onclick="fetchClipboardContent(); createNotification('Clipboard Refreshed', 'Clipboard content have been updated.');">Refresh</button>
+            <button onclick="manualRefresh()">Refresh</button>
             <div style="margin-top: 20px;">
                 <button id="downloadButton" style="display: none;" onclick="handleFileDownload()">Download to...</button>
             </div>
@@ -167,6 +167,11 @@
         ipcRenderer.invoke('getVersionInfo').then(version => {
             document.getElementById('versionInfo').textContent = `Version: ${version}`;
         });
+
+        async function manualRefresh() {
+            await fetchClipboardContent();
+            ipcRenderer.send('manualRefresh');
+        }
     </script>
 </body>
 </html>
