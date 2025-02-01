@@ -31,7 +31,7 @@
                 <label>
                     <input type="checkbox" id="automaticClipboardSync" onchange="savePreferences()">
                     Automatic Clipboard Sync
-                    <span class="tooltip">Automatically sync with newest clipboard content (local or cloud)</span>
+                    <span class="tooltip">Enable real-time clipboard synchronization using WebSocket connection</span>
                 </label>
             </div>
             <div class="preference-item">
@@ -58,15 +58,6 @@
         </div>
 
         <div class="setting-group">
-            <h2>Refresh Interval</h2>
-            <div>
-                <input type="number" id="refreshInterval" min="1" max="3600" placeholder="Seconds">
-                <button onclick="saveRefreshInterval()">Save</button>
-                <span class="tooltip">How often to check for new clipboard content (Default: 60 seconds)</span>
-            </div>
-        </div>
-
-        <div class="setting-group">
             <h2>Custom Keybindings</h2>
             <div class="preference-item">
                 <label for="copyKeybinding">Copy Keybinding:</label>
@@ -88,6 +79,16 @@
                 <p>Latest version: <span id="latestVersion">Checking...</span></p>
                 <button id="updateButton" disabled>Update</button>
                 <span class="tooltip">Update to the latest version of Crossy Clipboard</span>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <h2>Data Management</h2>
+            <div>
+                <button onclick="clearLocalData()" style="background-color: #dc3545;">
+                    Clear Local Data
+                </button>
+                <span class="tooltip">Clears all locally stored settings and preferences</span>
             </div>
         </div>
     </div>
@@ -135,19 +136,6 @@
             const settings = await ipcRenderer.invoke('getSettings');
             currentKey = await ipcRenderer.invoke('getApiKey');
             document.getElementById('maskedKey').textContent = '•'.repeat(currentKey?.length || 8);
-            document.getElementById('currentInterval').textContent = settings.refreshIntervalSeconds;
-        }
-
-        async function saveRefreshInterval() {
-            const interval = parseInt(document.getElementById('refreshInterval').value);
-            if (isNaN(interval) || interval < 1 || interval > 3600) {
-                alert('Please enter a valid interval between 1 and 3600 seconds');
-                return;
-            }
-            const settings = await ipcRenderer.invoke('getSettings');
-            settings.refreshIntervalSeconds = interval;
-            await ipcRenderer.invoke('saveSettings', settings);
-            // createNotification('Refresh Interval Updated', `Set to ${interval} seconds`);
         }
 
         // Add preference loading/saving
@@ -161,8 +149,6 @@
                 settings.preferences.debugLogging;
             document.getElementById('automaticUpdates').checked = 
                 settings.preferences.automaticUpdates;
-            document.getElementById('refreshInterval').value = 
-                settings.refreshIntervalSeconds;
         }
 
         async function savePreferences() {
@@ -317,6 +303,16 @@
         ipcRenderer.on('showInAppNotification', (event, { title, body }) => {
             createNotification(title, body);
         });
+
+        async function clearLocalData() {
+            if (confirm('Are you sure you want to clear all local data? This will reset all settings.')) {
+                await ipcRenderer.invoke('clearStore');
+                showNotification('Data Cleared', 'All local data has been cleared. The app will now reload.');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            }
+        }
     </script>
 </body>
 </html>

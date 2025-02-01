@@ -7,16 +7,18 @@ import FormData from 'form-data';
 import pkg from 'electron-updater';
 const { autoUpdater } = pkg;
 
+// Add socket.io-client
+import { io } from 'socket.io-client';
+
 const DEFAULT_SETTINGS = {
     apiKey: '',
     preferences: {
-        automaticClipboardSync: false,
+        automaticClipboardSync: false, // This now controls WebSocket connection
         notifications: false, // Changed to false
         debugLogging: false,
         automaticUpdates: true
     },
-    refreshIntervalSeconds: 60,
-    apiBaseUrl: 'https://crossyclip.com',
+    apiBaseUrl: 'https://dev.crossyclip.com',
     theme: {
         primaryColor: '#6200ee',
         hoverColor: '#3700b3',
@@ -28,6 +30,16 @@ const DEFAULT_SETTINGS = {
         copy: 'CommandOrControl+Shift+C',
         paste: 'CommandOrControl+Shift+V'
     }
+};
+
+let socket = null;
+
+// Add WebSocket state tracking
+let wsConnectionState = {
+    isConnecting: false,
+    retryCount: 0,
+    maxRetries: 3,
+    lastError: null
 };
 
 function logDebug(message, ...args) {
@@ -65,7 +77,6 @@ const initStore = () => {
 const store = initStore();
 
 let mainWindow;
-let refreshInterval;
 let lastLocalClipboardTimestamp = Date.now();
 let clipboardMonitoringInterval;
 
@@ -149,8 +160,15 @@ const setupIpcHandlers = () => {
     ipcMain.handle('saveSettings', async (event, newSettings) => {
         logDebug('Saving new settings:', newSettings);
         store.set(newSettings);
-        setupRefreshInterval();
+        
+        // Stop clipboard monitoring
+        if (clipboardMonitoringInterval) {
+            clearInterval(clipboardMonitoringInterval);
+            clipboardMonitoringInterval = null;
+        }
+        
         registerCustomKeybindings();
+        setupWebSocket(); // Update WebSocket connection based on new settings
         
         showNotification('Settings Saved', 'Your settings have been updated successfully');
         
@@ -277,6 +295,19 @@ const setupIpcHandlers = () => {
             mainWindow?.webContents.send('clipboardError', error.message);
         }
     });
+
+    // Add to setupIpcHandlers()
+    ipcMain.handle('clearStore', () => {
+        try {
+            store.clear();
+            showNotification('Data Cleared', 'All local data has been cleared');
+            return true;
+        } catch (error) {
+            logDebug('Failed to clear store:', error);
+            showNotification('Error', 'Failed to clear local data');
+            return false;
+        }
+    });
 };
 
 const createWindow = () => {
@@ -325,71 +356,73 @@ let lastClipboardContent = {
     filePath: null
 };
 
+// Update setupClipboardMonitoring to handle connection state
 const setupClipboardMonitoring = () => {
     logDebug('Setting up clipboard monitoring...');
     
     if (clipboardMonitoringInterval) {
-        logDebug('Clearing existing monitoring interval');
         clearInterval(clipboardMonitoringInterval);
         clipboardMonitoringInterval = null;
     }
 
     const settings = getSettings();
-    logDebug('Current settings:', {
-        automaticClipboardSync: settings.preferences.automaticClipboardSync
-    });
-
-    if (settings.preferences.automaticClipboardSync !== true) {
+    
+    if (!settings.preferences.automaticClipboardSync) {
         logDebug('Automatic clipboard sync disabled');
         return;
     }
 
-    logDebug('Starting clipboard monitoring');
-    clipboardMonitoringInterval = setInterval(() => {
-        const currentText = clipboard.readText();
-        const currentImage = clipboard.readImage();
-        
-        if (currentText && currentText !== lastClipboardContent.text) {
-            lastClipboardContent.text = currentText;
-            lastLocalClipboardTimestamp = Date.now();
-            cloudCopy();
+    // Setup WebSocket with delay to allow proper initialization
+    setTimeout(() => {
+        setupWebSocket();
+    }, 1000);
+
+    // Add delay before starting monitoring
+    setTimeout(() => {
+        if (!socket?.connected) {
+            logDebug('Starting monitoring but WebSocket not connected');
+        } else {
+            logDebug('Starting monitoring with active WebSocket connection');
         }
-        
-        if (!currentImage.isEmpty() && 
-            currentImage.toDataURL() !== lastClipboardContent.image) {
-            lastClipboardContent.image = currentImage.toDataURL();
-            lastLocalClipboardTimestamp = Date.now();
-            cloudCopy();
-        }
-        
-        try {
-            const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
-            const filePaths = rawFilePaths
-                .split('\0')
-                .filter(Boolean)
-                .map(fp => fp.replace(/\\/g, '\\'));
-                
-            if (filePaths[0] && filePaths[0] !== lastClipboardContent.filePath) {
-                lastClipboardContent.filePath = filePaths[0];
+
+        clipboardMonitoringInterval = setInterval(() => {
+            if (!socket?.connected) {
+                logDebug('Skipping clipboard check - no connection');
+                return;
+            }
+            const currentText = clipboard.readText();
+            const currentImage = clipboard.readImage();
+            
+            if (currentText && currentText !== lastClipboardContent.text) {
+                lastClipboardContent.text = currentText;
                 lastLocalClipboardTimestamp = Date.now();
                 cloudCopy();
             }
-        } catch (error) {
-        }
-    }, 1000);
+            
+            if (!currentImage.isEmpty() && 
+                currentImage.toDataURL() !== lastClipboardContent.image) {
+                lastClipboardContent.image = currentImage.toDataURL();
+                lastLocalClipboardTimestamp = Date.now();
+                cloudCopy();
+            }
+            
+            try {
+                const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
+                const filePaths = rawFilePaths
+                    .split('\0')
+                    .filter(Boolean)
+                    .map(fp => fp.replace(/\\/g, '\\'));
+                    
+                if (filePaths[0] && filePaths[0] !== lastClipboardContent.filePath) {
+                    lastClipboardContent.filePath = filePaths[0];
+                    lastLocalClipboardTimestamp = Date.now();
+                    cloudCopy();
+                }
+            } catch (error) {
+            }
+        }, 1000);
+    }, 2000);
 };
-
-function setupRefreshInterval() {
-    if (refreshInterval) {
-        clearInterval(refreshInterval);
-    }
-    const settings = store.get();
-    const intervalMs = settings.refreshIntervalSeconds * 1000;
-    refreshInterval = setInterval(() => {
-        checkAndSyncClipboard();
-        mainWindow?.webContents.send('triggerRefresh');
-    }, intervalMs);
-}
 
 const cloudCopy = async () => {
     const appKey = getAppKey();
@@ -403,6 +436,17 @@ const cloudCopy = async () => {
         await cloudCopyFile(tempPath);
         fs.unlinkSync(tempPath);
         mainWindow?.webContents.send('triggerRefresh');
+        
+        // After successful copy, emit update event
+        if (socket?.connected) {
+            socket.emit('clipboard_update', null, (error) => {
+                if (error) {
+                    logDebug('Failed to send clipboard update:', error);
+                } else {
+                    logDebug('Clipboard update sent successfully');
+                }
+            });
+        }
         return;
     }
 
@@ -415,6 +459,17 @@ const cloudCopy = async () => {
             mainWindow.webContents.send('refreshClipboard');
             mainWindow?.webContents.send('triggerRefresh');
             showNotification('Clipboard Synced', 'Text copied to cloud clipboard');
+            
+            // After successful copy, emit update event
+            if (socket?.connected) {
+                socket.emit('clipboard_update', null, (error) => {
+                    if (error) {
+                        logDebug('Failed to send clipboard update:', error);
+                    } else {
+                        logDebug('Clipboard update sent successfully');
+                    }
+                });
+            }
         } catch (error) {
             logDebug('Operation failed:', error);
             showNotification('Error', error.message);
@@ -435,6 +490,17 @@ const cloudCopy = async () => {
             if (fs.existsSync(filePath)) {
                 await cloudCopyFile(filePath);
                 mainWindow?.webContents.send('triggerRefresh');
+                
+                // After successful copy, emit update event
+                if (socket?.connected) {
+                    socket.emit('clipboard_update', null, (error) => {
+                        if (error) {
+                            logDebug('Failed to send clipboard update:', error);
+                        } else {
+                            logDebug('Clipboard update sent successfully');
+                        }
+                    });
+                }
             } else {
                 console.error('File not found:', filePath);
             }
@@ -643,12 +709,117 @@ const registerCustomKeybindings = () => {
     globalShortcut.register(keybindings.paste, cloudPaste);
 };
 
+// Update the setupWebSocket function
+const setupWebSocket = () => {
+    const settings = getSettings();
+    const appKey = getAppKey();
+
+    logDebug('Setting up WebSocket connection...');
+    logDebug('Auto-sync enabled:', settings.preferences.automaticClipboardSync);
+    logDebug('App key present:', !!appKey);
+
+    if (socket) {
+        logDebug('Cleaning up existing socket connection');
+        socket.removeAllListeners();
+        socket.disconnect();
+        socket = null;
+    }
+
+    if (!settings.preferences.automaticClipboardSync || !appKey) {
+        logDebug('WebSocket setup skipped - sync disabled or no app key');
+        return;
+    }
+
+    try {
+        wsConnectionState.isConnecting = true;
+        wsConnectionState.retryCount = 0;
+        
+        logDebug('Connecting to WebSocket server:', settings.apiBaseUrl);
+        socket = connectSocket(settings, appKey);
+
+        socket.on('connect', () => {
+            logDebug('WebSocket connected successfully');
+            wsConnectionState.isConnecting = false;
+            wsConnectionState.retryCount = 0;
+            wsConnectionState.lastError = null;
+        });
+
+        socket.on('connect_error', (error) => {
+            wsConnectionState.lastError = error;
+            logDebug('WebSocket connection error:', {
+                message: error.message,
+                type: error.type,
+                description: error.description,
+                attempt: wsConnectionState.retryCount + 1
+            });
+
+            if (wsConnectionState.retryCount < wsConnectionState.maxRetries) {
+                wsConnectionState.retryCount++;
+                logDebug(`Retrying connection (${wsConnectionState.retryCount}/${wsConnectionState.maxRetries})`);
+            } else {
+                logDebug('Max retry attempts reached');
+                showNotification('Connection Error', 
+                    `Failed to connect after ${wsConnectionState.maxRetries} attempts`);
+            }
+        });
+
+        socket.on('disconnect', (reason) => {
+            logDebug('WebSocket disconnected:', reason);
+            if (reason === 'io server disconnect') {
+                // Server disconnected us, attempt reconnection
+                socket.connect();
+            }
+        });
+
+        socket.on('error', (error) => {
+            logDebug('WebSocket error:', error);
+            showNotification('WebSocket Error', 'Connection error occurred');
+        });
+
+        // Debug events
+        socket.onAny((event, ...args) => {
+            logDebug('WebSocket event:', { event, args });
+        });
+
+    } catch (error) {
+        wsConnectionState.lastError = error;
+        logDebug('Error setting up WebSocket:', {
+            message: error.message,
+            stack: error.stack
+        });
+        showNotification('Connection Error', 'Failed to initialize connection');
+    }
+};
+
+// Update the connectSocket function
+function connectSocket(settings, appKey) {
+    if (!settings || !appKey) {
+        throw new Error('Missing required connection parameters');
+    }
+
+    logDebug('Creating socket connection with:', {
+        url: settings.apiBaseUrl,
+        transports: ['websocket']
+    });
+
+    const socket = io(settings.apiBaseUrl, {
+        auth: { appKey },
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 3,
+        reconnectionDelay: 1000,
+        timeout: 5000,
+        forceNew: true
+    });
+
+    return socket;
+}
+
 app.whenReady().then(async () => {
     try {
         await initStore();
         createWindow();
         setupIpcHandlers();
-        setupRefreshInterval();
         setupClipboardMonitoring();
         setupAutoUpdater(); // Add this line
         globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
