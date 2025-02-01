@@ -1,6 +1,6 @@
 {
   "name": "crossy-electron",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "type": "module",
   "main": "main.js",
   "scripts": {
@@ -11,7 +11,8 @@
   },
   "build": {
     "appId": "com.crossyclipboard.electron",
-    "productName": "Crossy Clipboard",
+    "productName": "Crossy.Clipboard",
+    "artifactName": "${productName}.Setup.${version}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -40,7 +41,8 @@
       {
         "provider": "github",
         "owner": "Crossy-Clipboard",
-        "repo": "crossy-electron"
+        "repo": "crossy-electron",
+        "releaseType": "release"
       }
     ]
   },
