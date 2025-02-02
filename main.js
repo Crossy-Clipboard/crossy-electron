@@ -42,6 +42,20 @@ let wsConnectionState = {
     lastError: null
 };
 
+// Add near the top with other global variables
+const lastClipboardContent = {
+    text: '',
+    image: '',
+    filePath: '',
+    timestamp: 0
+};
+
+const DEBOUNCE_DELAY = 1000; // 1 second
+let lastOperation = {
+    timestamp: 0,
+    type: null
+};
+
 function logDebug(message, ...args) {
     const settings = getSettings();
     if (settings.preferences.debugLogging) {
@@ -324,12 +338,20 @@ const createWindow = () => {
     mainWindow.loadFile('index.html');
 };
 
+// Replace the checkAndSyncClipboard function
 const checkAndSyncClipboard = async () => {
     const settings = getSettings();
     if (!settings.preferences.automaticClipboardSync) return;
 
     const appKey = getAppKey();
     if (!appKey) return;
+
+    // Add debouncing check
+    const now = Date.now();
+    if (now - lastOperation.timestamp < DEBOUNCE_DELAY) {
+        logDebug('Debouncing clipboard check');
+        return;
+    }
 
     try {
         const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
@@ -338,25 +360,21 @@ const checkAndSyncClipboard = async () => {
         
         const cloudTimestamp = parseInt(response.headers['x-clipboard-timestamp']);
         
-        if (cloudTimestamp > lastLocalClipboardTimestamp) {
+        if (cloudTimestamp > lastLocalClipboardTimestamp && 
+            lastOperation.type !== 'paste') {
             await cloudPaste();
-        } else if (lastLocalClipboardTimestamp > cloudTimestamp) {
+            lastOperation = { timestamp: Date.now(), type: 'paste' };
+        } else if (lastLocalClipboardTimestamp > cloudTimestamp && 
+                   lastOperation.type !== 'copy') {
             await cloudCopy();
+            lastOperation = { timestamp: Date.now(), type: 'copy' };
         }
     } catch (error) {
         logDebug('Operation failed:', error);
-        showNotification('Error', error.message);
-        mainWindow?.webContents.send('clipboardError', error.message);
     }
 };
 
-let lastClipboardContent = {
-    text: '',
-    image: null,
-    filePath: null
-};
-
-// Update setupClipboardMonitoring to handle connection state
+// Replace setupClipboardMonitoring function
 const setupClipboardMonitoring = () => {
     logDebug('Setting up clipboard monitoring...');
     
@@ -372,38 +390,35 @@ const setupClipboardMonitoring = () => {
         return;
     }
 
-    // Setup WebSocket with delay to allow proper initialization
-    setTimeout(() => {
-        setupWebSocket();
-    }, 1000);
+    setupWebSocket();
 
-    // Add delay before starting monitoring
-    setTimeout(() => {
+    clipboardMonitoringInterval = setInterval(() => {
         if (!socket?.connected) {
-            logDebug('Starting monitoring but WebSocket not connected');
-        } else {
-            logDebug('Starting monitoring with active WebSocket connection');
+            logDebug('Skipping clipboard check - no connection');
+            return;
         }
 
-        clipboardMonitoringInterval = setInterval(() => {
-            if (!socket?.connected) {
-                logDebug('Skipping clipboard check - no connection');
-                return;
-            }
+        const now = Date.now();
+        if (now - lastOperation.timestamp < DEBOUNCE_DELAY) {
+            return;
+        }
+
+        try {
             const currentText = clipboard.readText();
             const currentImage = clipboard.readImage();
-            
+            let hasChanged = false;
+
             if (currentText && currentText !== lastClipboardContent.text) {
                 lastClipboardContent.text = currentText;
-                lastLocalClipboardTimestamp = Date.now();
-                cloudCopy();
+                lastClipboardContent.timestamp = now;
+                hasChanged = true;
             }
             
             if (!currentImage.isEmpty() && 
                 currentImage.toDataURL() !== lastClipboardContent.image) {
                 lastClipboardContent.image = currentImage.toDataURL();
-                lastLocalClipboardTimestamp = Date.now();
-                cloudCopy();
+                lastClipboardContent.timestamp = now;
+                hasChanged = true;
             }
             
             try {
@@ -415,14 +430,25 @@ const setupClipboardMonitoring = () => {
                     
                 if (filePaths[0] && filePaths[0] !== lastClipboardContent.filePath) {
                     lastClipboardContent.filePath = filePaths[0];
-                    lastLocalClipboardTimestamp = Date.now();
-                    cloudCopy();
+                    lastClipboardContent.timestamp = now;
+                    hasChanged = true;
                 }
             } catch (error) {
+                // Ignore file reading errors
             }
-        }, 1000);
-    }, 2000);
+
+            if (hasChanged) {
+                lastLocalClipboardTimestamp = now;
+                lastOperation = { timestamp: now, type: 'copy' };
+                cloudCopy();
+            }
+        } catch (error) {
+            logDebug('Clipboard monitoring error:', error);
+        }
+    }, 1000);
 };
+
+
 
 // Update the cloudCopy function's WebSocket notification
 const cloudCopy = async () => {
@@ -782,10 +808,19 @@ const setupWebSocket = () => {
 
         socket.on('clipboard_update', async () => {
             logDebug('Received clipboard_update event');
+            
+            // Check if we just performed an operation
+            const now = Date.now();
+            if (now - lastOperation.timestamp < DEBOUNCE_DELAY) {
+                logDebug('Skipping clipboard update - too soon after last operation');
+                return;
+            }
+
             try {
                 await cloudPaste(); // Fetch and apply latest content
+                lastOperation = { timestamp: now, type: 'paste' };
                 mainWindow?.webContents.send('triggerRefresh'); // Update UI
-                showNotification('Clipboard Updated', 'New content received');
+                // showNotification('Clipboard Updated', 'New content received');
             } catch (error) {
                 logDebug('Failed to handle clipboard update:', error);
                 showNotification('Error', 'Failed to sync latest clipboard content');
