@@ -10,6 +10,9 @@ const { autoUpdater } = pkg;
 // Add socket.io-client
 import { io } from 'socket.io-client';
 
+// Add crypto import
+import crypto from 'crypto';
+
 const DEFAULT_SETTINGS = {
     apiKey: '',
     preferences: {
@@ -48,6 +51,15 @@ const lastClipboardContent = {
     image: '',
     filePath: '',
     timestamp: 0
+};
+
+// Add near the top with other state variables
+const lastDownloadedContent = {
+    timestamp: 0,
+    textHash: '',
+    imageHash: '',
+    filePath: '',
+    debounceDelay: 2000 // 2 second delay
 };
 
 const DEBOUNCE_DELAY = 1000; // 1 second
@@ -448,16 +460,30 @@ const setupClipboardMonitoring = () => {
     }, 1000);
 };
 
-
+// Add helper function for hashing content
+function hashContent(content) {
+    return crypto.createHash('md5').update(content).digest('hex');
+}
 
 // Update the cloudCopy function's WebSocket notification
 const cloudCopy = async () => {
+    const now = Date.now();
+    if (now - lastDownloadedContent.timestamp < lastDownloadedContent.debounceDelay) {
+        logDebug('Skipping upload - too soon after download');
+        return;
+    }
+
     const appKey = getAppKey();
     const settings = getSettings();
     if (!appKey) return;
     
     const image = clipboard.readImage();
     if (!image.isEmpty()) {
+        const imageHash = hashContent(image.toPNG());
+        if (imageHash === lastDownloadedContent.imageHash) {
+            logDebug('Skipping upload - image matches last download');
+            return;
+        }
         const tempPath = path.join(app.getPath('temp'), `clipboard-${Date.now()}.png`);
         fs.writeFileSync(tempPath, image.toPNG());
         await cloudCopyFile(tempPath);
@@ -479,6 +505,11 @@ const cloudCopy = async () => {
 
     const text = clipboard.readText();
     if (text) {
+        const textHash = hashContent(text);
+        if (textHash === lastDownloadedContent.textHash) {
+            logDebug('Skipping upload - text matches last download');
+            return;
+        }
         try {
             await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
                 headers: { AppKey: appKey },
@@ -512,6 +543,10 @@ const cloudCopy = async () => {
         
         if (filePaths.length > 0) {
             const filePath = filePaths[0];
+            if (filePath && filePath === lastDownloadedContent.filePath) {
+                logDebug('Skipping upload - file matches last download');
+                return;
+            }
             if (fs.existsSync(filePath)) {
                 await cloudCopyFile(filePath);
                 mainWindow?.webContents.send('triggerRefresh');
@@ -571,6 +606,7 @@ const cloudCopyFile = async (filePath) => {
     }
 };
 
+// Update cloudPaste to track downloaded content
 const cloudPaste = async () => {
     const appKey = getAppKey();
     const settings = getSettings();
@@ -583,7 +619,10 @@ const cloudPaste = async () => {
         });
 
         if (response.data.type === 'text') {
-            clipboard.writeText(response.data.content);
+            const textContent = response.data.content;
+            lastDownloadedContent.textHash = hashContent(textContent);
+            lastDownloadedContent.timestamp = Date.now();
+            clipboard.writeText(textContent);
             mainWindow?.webContents.send('refreshClipboard');
             showNotification('Clipboard Updated', 'New text content pasted from cloud');
             return;
@@ -597,9 +636,13 @@ const cloudPaste = async () => {
         const contentType = fileResponse.headers['content-type'];
 
         if (contentType.startsWith('image/')) {
-            const img = nativeImage.createFromBuffer(fileResponse.data);
+            const imgBuffer = fileResponse.data;
+            lastDownloadedContent.imageHash = hashContent(imgBuffer);
+            lastDownloadedContent.timestamp = Date.now();
+            const img = nativeImage.createFromBuffer(imgBuffer);
             clipboard.writeImage(img);
         } else {
+            // Handle file downloads
             let filename = 'downloaded_file';
             const disposition = fileResponse.headers['content-disposition'];
             if (disposition) {
@@ -610,6 +653,8 @@ const cloudPaste = async () => {
             }
             const tempPath = path.join(app.getPath('temp'), filename);
             fs.writeFileSync(tempPath, fileResponse.data);
+            lastDownloadedContent.filePath = tempPath;
+            lastDownloadedContent.timestamp = Date.now();
             clipboard.writeBuffer('FileNameW', Buffer.from(tempPath + '\0', 'ucs2'));
         }
 
