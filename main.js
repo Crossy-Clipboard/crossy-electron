@@ -18,7 +18,7 @@ const DEFAULT_SETTINGS = {
         debugLogging: false,
         automaticUpdates: true
     },
-    apiBaseUrl: 'https://dev.crossyclip.com',
+    apiBaseUrl: 'https://api.crossyclip.com',
     theme: {
         primaryColor: '#6200ee',
         hoverColor: '#3700b3',
@@ -424,6 +424,7 @@ const setupClipboardMonitoring = () => {
     }, 2000);
 };
 
+// Update the cloudCopy function's WebSocket notification
 const cloudCopy = async () => {
     const appKey = getAppKey();
     const settings = getSettings();
@@ -456,11 +457,9 @@ const cloudCopy = async () => {
             await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
                 headers: { AppKey: appKey },
             });
-            mainWindow.webContents.send('refreshClipboard');
             mainWindow?.webContents.send('triggerRefresh');
             showNotification('Clipboard Synced', 'Text copied to cloud clipboard');
             
-            // After successful copy, emit update event
             if (socket?.connected) {
                 socket.emit('clipboard_update', null, (error) => {
                     if (error) {
@@ -781,6 +780,18 @@ const setupWebSocket = () => {
             logDebug('WebSocket event:', { event, args });
         });
 
+        socket.on('clipboard_update', async () => {
+            logDebug('Received clipboard_update event');
+            try {
+                await cloudPaste(); // Fetch and apply latest content
+                mainWindow?.webContents.send('triggerRefresh'); // Update UI
+                showNotification('Clipboard Updated', 'New content received');
+            } catch (error) {
+                logDebug('Failed to handle clipboard update:', error);
+                showNotification('Error', 'Failed to sync latest clipboard content');
+            }
+        });
+        
     } catch (error) {
         wsConnectionState.lastError = error;
         logDebug('Error setting up WebSocket:', {
