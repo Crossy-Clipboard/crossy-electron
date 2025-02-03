@@ -7,7 +7,11 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
     "clean": "rimraf dist",
-    "build": "npm run clean && electron-builder"
+    "build": "npm run clean && electron-builder",
+    "build:win": "npm run clean && electron-builder --win",
+    "build:mac": "npm run clean && electron-builder --mac",
+    "build:linux": "npm run clean && electron-builder --linux",
+    "release": "electron-builder --publish always"
   },
   "build": {
     "appId": "com.crossyclipboard.electron",
@@ -31,20 +35,34 @@
       "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
     ],
     "mac": {
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": "nsis",
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "build/icon.png"
     },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "Crossy-Clipboard",
-        "repo": "crossy-electron",
-        "releaseType": "release"
-      }
-    ]
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "category": "Utility"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Crossy-Clipboard",
+      "repo": "crossy-electron",
+      "releaseType": "release",
+      "private": false
+    }
   },
   "repository": {
     "type": "git",
