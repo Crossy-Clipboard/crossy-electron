@@ -35,7 +35,13 @@ jobs:
         
       - name: Set version
         id: get_version
-        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # Ensure version starts with 'v'
+          if [[ $VERSION != v* ]]; then
+            VERSION="v$VERSION"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
         
       - name: Set build matrix
         id: set-matrix

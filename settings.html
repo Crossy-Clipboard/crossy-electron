@@ -180,13 +180,16 @@
         async function setupUpdateCheck() {
             // Get current version
             const currentVersion = await ipcRenderer.invoke('getVersionInfo');
-            document.getElementById('currentVersion').textContent = currentVersion;
+            // Add 'v' prefix when displaying versions
+            document.getElementById('currentVersion').textContent = 
+                currentVersion.startsWith('v') ? currentVersion : `v${currentVersion}`;
 
             // Check for updates
             const updateAvailable = await ipcRenderer.invoke('checkForUpdates');
             const latestVersion = await ipcRenderer.invoke('getLatestVersion');
             
-            document.getElementById('latestVersion').textContent = latestVersion || 'Unknown';
+            document.getElementById('latestVersion').textContent = 
+                latestVersion ? (latestVersion.startsWith('v') ? latestVersion : `v${latestVersion}`) : 'Unknown';
             const updateButton = document.getElementById('updateButton');
             
             updateButton.disabled = !updateAvailable;

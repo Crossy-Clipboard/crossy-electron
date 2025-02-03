@@ -739,6 +739,16 @@ const setupAutoUpdater = () => {
         );
         mainWindow?.webContents.send('updateDownloaded', info);
     });
+
+    // Update in setupAutoUpdater() function
+    autoUpdater.on('update-available', (info) => {
+        logDebug('Update available:', info);
+        showNotification(
+            'Update Available', 
+            `Version v${info.version} is available for download`  // Add 'v' prefix
+        );
+        mainWindow?.webContents.send('updateAvailable', info);
+    });
 };
 
 const registerCustomKeybindings = () => {
@@ -898,7 +908,7 @@ app.whenReady().then(async () => {
             logDebug('Update available:', info);
             showNotification(
                 'Update Available', 
-                `Version ${info.version} is available for download`
+                `Version v${info.version} is available for download`  // Add 'v' prefix
             );
             mainWindow?.webContents.send('updateAvailable', info);
         });
