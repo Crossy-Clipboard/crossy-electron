@@ -37,10 +37,7 @@ jobs:
         id: get_version
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          # Ensure version starts with 'v'
-          if [[ $VERSION != v* ]]; then
-            VERSION="v$VERSION"
-          fi
+          # Keep version without "v" for electron-builder
           echo "version=$VERSION" >> $GITHUB_OUTPUT
         
       - name: Set build matrix
