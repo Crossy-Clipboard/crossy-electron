@@ -71,7 +71,10 @@
   "keywords": [
     "clipboard"
   ],
-  "author": "Crossy Clipboard",
+  "author": {
+    "name": "Crossy Clipboard",
+    "email": "contact@crossyclip.com"
+  },
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/Crossy-Clipboard/crossy-electron/issues"
