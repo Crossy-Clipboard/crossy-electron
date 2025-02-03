@@ -1,9 +1,9 @@
 name: Build and Release
 
 on:
+  workflow_dispatch:  # Manual trigger
   push:
-    branches: [main]
-    tags: ['v*']
+    tags: ['v*']     # Only trigger on version tags
 
 jobs:
   prepare:
@@ -11,7 +11,7 @@ jobs:
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - id: get_version
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
@@ -31,10 +31,10 @@ jobs:
             target: nsis,portable
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
           cache: 'npm'
@@ -50,11 +50,10 @@ jobs:
           args: --${{ matrix.os == 'windows-latest' && 'win' || matrix.os == 'macos-latest' && 'mac' || 'linux' }} -c.extraMetadata.version=${{ needs.prepare.outputs.version }}
 
         env:
-          # Disable code signing for now
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-build
           path: |
@@ -74,15 +73,15 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: false
