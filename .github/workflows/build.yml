@@ -90,7 +90,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-build
-          path: dist
+          path: |
+            dist
+            dist/latest*.yml
+            dist/*-latest.yml
           if-no-files-found: error
 
   release:
@@ -111,7 +114,10 @@ jobs:
         with:
           draft: false
           prerelease: false
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            artifacts/**/latest*.yml
+            artifacts/**/*-latest.yml
           name: "Release v${{ needs.prepare.outputs.version }}"
           generate_release_notes: true
         env:
