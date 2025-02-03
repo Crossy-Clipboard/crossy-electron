@@ -29,23 +29,32 @@
             <h2>Preferences</h2>
             <div class="preference-item">
                 <label>
-                    <input type="checkbox" id="automaticClipboardSync" onchange="savePreferences()">
                     Automatic Clipboard Sync
                     <span class="tooltip">Enable real-time clipboard synchronization using WebSocket connection</span>
                 </label>
-            </div>
-            <div class="preference-item">
-                <label>
-                    <input type="checkbox" id="notifications" onchange="savePreferences()">
-                    System Notifications
-                    <span class="tooltip">Use system notifications (Default: Off)</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="automaticClipboardSync" onchange="savePreferences()">
+                    <span class="toggle-slider"></span>
                 </label>
             </div>
             <div class="preference-item">
                 <label>
-                    <input type="checkbox" id="debugLogging" onchange="savePreferences()">
+                    System Notifications
+                    <span class="tooltip">Use system notifications (Default: Off)</span>
+                </label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="notifications" onchange="savePreferences()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="preference-item">
+                <label>
                     Debug Logging
                     <span class="tooltip">Show detailed debug messages in console (Default: Off)</span>
+                </label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="debugLogging" onchange="savePreferences()">
+                    <span class="toggle-slider"></span>
                 </label>
             </div>
         </div>
