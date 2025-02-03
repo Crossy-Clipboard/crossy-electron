@@ -18,8 +18,7 @@ const DEFAULT_SETTINGS = {
     preferences: {
         automaticClipboardSync: false, // This now controls WebSocket connection
         notifications: false, // Changed to false
-        debugLogging: false,
-        automaticUpdates: true
+        debugLogging: false
     },
     apiBaseUrl: 'https://api.crossyclip.com',
     theme: {
@@ -132,30 +131,6 @@ const saveAppKey = (key) => {
     store?.set('apiKey', key);
 };
 
-const checkForUpdatesIfEnabled = async () => {
-    const settings = getSettings();
-    if (settings.preferences.automaticUpdates) {
-        logDebug('Checking for updates (auto-updates enabled)');
-        try {
-            await autoUpdater.checkForUpdatesAndNotify();
-        } catch (error) {
-            logDebug('Auto-update check failed:', error);
-            // Don't show notification for 404 errors since they're expected when no update exists
-            if (!error.message.includes('404')) {
-                showNotification(
-                    'Update Check Failed', 
-                    'Could not check for updates. Will try again later.'
-                );
-            }
-            // Don't crash the app, just log the error
-            return false;
-        }
-    } else {
-        logDebug('Auto-updates disabled - skipping update check');
-    }
-    return true;
-};
-
 const setupIpcHandlers = () => {
     ipcMain.on('saveApiKey', (event, key) => {
         saveAppKey(key);
@@ -198,9 +173,6 @@ const setupIpcHandlers = () => {
         
         showNotification('Settings Saved', 'Your settings have been updated successfully');
         
-        if (newSettings.preferences.automaticUpdates) {
-            await checkForUpdatesIfEnabled();
-        }
         return store.get();
     });
 
@@ -916,14 +888,6 @@ app.whenReady().then(async () => {
         globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
         globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
         registerCustomKeybindings(); // Register custom keybindings on app ready
-
-        // Initial update check with error handling
-        try {
-            await checkForUpdatesIfEnabled();
-        } catch (error) {
-            logDebug('Initial update check failed:', error);
-            // Don't crash the app, continue running
-        }
 
         // Setup auto-updater events
         autoUpdater.on('checking-for-update', () => {

@@ -48,13 +48,6 @@
                     <span class="tooltip">Show detailed debug messages in console (Default: Off)</span>
                 </label>
             </div>
-            <div class="preference-item">
-                <label>
-                    <input type="checkbox" id="automaticUpdates" onchange="savePreferences()">
-                    Automatic Updates
-                    <span class="tooltip">Enable or disable automatic updates for the app</span>
-                </label>
-            </div>
         </div>
 
         <div class="setting-group">
@@ -147,8 +140,6 @@
                 settings.preferences.notifications;
             document.getElementById('debugLogging').checked = 
                 settings.preferences.debugLogging;
-            document.getElementById('automaticUpdates').checked = 
-                settings.preferences.automaticUpdates;
         }
 
         async function savePreferences() {
@@ -160,9 +151,7 @@
                 notifications: 
                     document.getElementById('notifications').checked,
                 debugLogging:
-                    document.getElementById('debugLogging').checked,
-                automaticUpdates:
-                    document.getElementById('automaticUpdates').checked
+                    document.getElementById('debugLogging').checked
             };
             await ipcRenderer.invoke('saveSettings', newSettings);
             await ipcRenderer.invoke('refreshMonitoring');
