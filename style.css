@@ -269,3 +269,25 @@ input:checked + .toggle-slider:before {
         opacity: 0;
     }
 }
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 2px;
+    border: 1.5px solid var(--surface-color);
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #666;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--hover-color);
+}
