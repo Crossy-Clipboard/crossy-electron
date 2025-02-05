@@ -1,6 +1,6 @@
 {
   "name": "crossy-electron",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "type": "module",
   "main": "main.js",
   "scripts": {
