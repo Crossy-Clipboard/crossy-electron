@@ -1,0 +1,91 @@
+name: Just Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Build Platform'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - macos
+          - linux
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          
+      - name: Generate package-lock.json
+        run: npm i --package-lock-only
+        
+      - name: Set version
+        id: get_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        
+      - name: Set build matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event.inputs.platform }}" = "windows" ]; then
+            echo "matrix={\"include\":[{\"os\":\"windows-latest\",\"target\":\"nsis,portable\"}]}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.platform }}" = "macos" ]; then
+            echo "matrix={\"include\":[{\"os\":\"macos-latest\",\"target\":\"dmg,zip\"}]}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.platform }}" = "linux" ]; then
+            echo "matrix={\"include\":[{\"os\":\"ubuntu-latest\",\"target\":\"AppImage,deb,rpm\"}]}" >> $GITHUB_OUTPUT
+          else
+            echo "matrix={\"include\":[{\"os\":\"windows-latest\",\"target\":\"nsis,portable\"},{\"os\":\"macos-latest\",\"target\":\"dmg,zip\"},{\"os\":\"ubuntu-latest\",\"target\":\"AppImage,deb,rpm\"}]}" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(needs.prepare.outputs.matrix)}}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm install -g @electron-forge/cli
+
+      - name: Build Electron app
+        uses: samuelmeuli/action-electron-builder@v1
+        with:
+          github_token: ${{ secrets.github_token }}
+          release: false
+          args: --${{ matrix.os == 'windows-latest' && 'win' || matrix.os == 'macos-latest' && 'mac' || 'linux' }} -c.extraMetadata.version=${{ needs.prepare.outputs.version }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-build
+          path: |
+            dist
+            dist/latest*.yml
+            dist/*-latest.yml
+          if-no-files-found: error
