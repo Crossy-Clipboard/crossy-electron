@@ -57,6 +57,16 @@
                     <span class="toggle-slider"></span>
                 </label>
             </div>
+            <div class="preference-item">
+                <label>
+                    Run in Background
+                    <span class="tooltip">Keep app running in background when window is closed</span>
+                </label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="runInBackground" onchange="savePreferences()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
         </div>
 
         <div class="setting-group">
@@ -149,6 +159,8 @@
                 settings.preferences.notifications;
             document.getElementById('debugLogging').checked = 
                 settings.preferences.debugLogging;
+            document.getElementById('runInBackground').checked = 
+                settings.preferences.runInBackground;
         }
 
         async function savePreferences() {
@@ -160,7 +172,9 @@
                 notifications: 
                     document.getElementById('notifications').checked,
                 debugLogging:
-                    document.getElementById('debugLogging').checked
+                    document.getElementById('debugLogging').checked,
+                runInBackground:  // Add this line
+                    document.getElementById('runInBackground').checked
             };
             await ipcRenderer.invoke('saveSettings', newSettings);
             await ipcRenderer.invoke('refreshMonitoring');

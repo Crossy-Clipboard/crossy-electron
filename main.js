@@ -1,5 +1,5 @@
 import Store from 'electron-store';
-import { app, BrowserWindow, globalShortcut, clipboard, ipcMain, dialog, nativeImage, Notification } from 'electron';
+import { app, BrowserWindow, globalShortcut, clipboard, ipcMain, dialog, nativeImage, Notification, Tray, Menu } from 'electron';
 import axios from 'axios';
 import fs from 'fs/promises';
 import path from 'path';
@@ -15,12 +15,20 @@ import crypto from 'crypto';
 
 import { tmpdir } from 'os';
 
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const DEFAULT_SETTINGS = {
     apiKey: '',
     preferences: {
         automaticClipboardSync: false, // This now controls WebSocket connection
         notifications: false, // Changed to false
-        debugLogging: false
+        debugLogging: false,
+        runInBackground: process.platform === 'darwin', // macOS only, else false
     },
     apiBaseUrl: 'https://api.crossyclip.com',
     theme: {
@@ -103,6 +111,7 @@ const initStore = () => {
 
 const store = initStore();
 
+let tray = null; // Add this line
 let mainWindow;
 let lastLocalClipboardTimestamp = Date.now();
 let clipboardMonitoringInterval;
@@ -310,8 +319,10 @@ const setupIpcHandlers = () => {
     });
 };
 
+// Add this to preserve the window instance when closing
 const createWindow = () => {
     mainWindow = new BrowserWindow({
+        autoHideMenuBar: true,
         width: 800,
         height: 600,
         webPreferences: {
@@ -319,9 +330,32 @@ const createWindow = () => {
             contextIsolation: false,
             webSecurity: true
         },
+        // Add icon for taskbar/dock
+        icon: path.join(__dirname, process.platform === 'win32' ? 'build/icon.ico' : 'build/icon.png')
     });
 
     mainWindow.loadFile('index.html');
+
+    mainWindow.on('close', (event) => {
+        const settings = getSettings();
+        if (settings.preferences.runInBackground) {
+            event.preventDefault();
+            mainWindow.hide();
+            
+            // Handle macOS dock visibility
+            if (process.platform === 'darwin') {
+                app.dock.hide();
+            }
+        }
+    });
+
+    // Show in taskbar when window is visible
+    mainWindow.on('show', () => {
+        if (process.platform === 'darwin') {
+            app.dock.show();
+        }
+        mainWindow.setSkipTaskbar(false);
+    });
 };
 
 // Replace the checkAndSyncClipboard function
@@ -906,71 +940,231 @@ function connectSocket(settings, appKey) {
     return socket;
 }
 
-app.whenReady().then(async () => {
+// Update the createTray function with better implementation
+const createTray = () => {
+    if (tray !== null) return;
+
     try {
-        await initStore();
-        createWindow();
-        setupIpcHandlers();
-        setupClipboardMonitoring();
-        setupAutoUpdater(); // Add this line
-        globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
-        globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
-        registerCustomKeybindings(); // Register custom keybindings on app ready
+        // Determine icon path based on platform
+        const iconPath = path.join(__dirname, 
+            process.platform === 'win32' ? 'build/icon.ico' : 'build/icon.png'
+        );
 
-        // Setup auto-updater events
-        autoUpdater.on('checking-for-update', () => {
-            logDebug('Checking for updates...');
+        // Create tray with error handling
+        try {
+            tray = new Tray(iconPath);
+        } catch (iconError) {
+            logDebug('Failed to load tray icon:', iconError);
+            // Fallback to default icon if custom icon fails
+            tray = new Tray();
+        }
+
+        // Create more detailed context menu
+        const contextMenu = Menu.buildFromTemplate([
+            {
+                label: 'Open Crossy Clipboard',
+                click: () => {
+                    mainWindow?.show();
+                    mainWindow?.focus();
+                    if (process.platform === 'darwin') {
+                        app.dock.show();
+                    }
+                }
+            },
+            { type: 'separator' },
+            {
+                label: 'Copy to Cloud',
+                click: async () => {
+                    try {
+                        await cloudCopy();
+                    } catch (error) {
+                        showNotification('Error', 'Failed to copy to cloud');
+                    }
+                }
+            },
+            {
+                label: 'Paste from Cloud',
+                click: async () => {
+                    try {
+                        await cloudPaste();
+                    } catch (error) {
+                        showNotification('Error', 'Failed to paste from cloud');
+                    }
+                }
+            },
+            { type: 'separator' },
+            {
+                label: 'Settings',
+                click: () => {
+                    mainWindow?.show();
+                    mainWindow?.focus();
+                    mainWindow?.webContents.send('showSettings');
+                }
+            },
+            { type: 'separator' },
+            { 
+                label: 'Quit',
+                click: () => {
+                    // Cleanup before quit
+                    if (tray) {
+                        tray.destroy();
+                        tray = null;
+                    }
+                    app.quit();
+                }
+            }
+        ]);
+
+        // Set up tray properties
+        tray.setToolTip('Crossy Clipboard');
+        tray.setContextMenu(contextMenu);
+
+        // Handle platform-specific click behavior
+        if (process.platform === 'win32' || process.platform === 'linux') {
+            // Single click shows window on Windows/Linux
+            tray.on('click', () => {
+                if (mainWindow) {
+                    if (mainWindow.isVisible()) {
+                        mainWindow.hide();
+                    } else {
+                        mainWindow.show();
+                        mainWindow.focus();
+                    }
+                }
+            });
+        }
+
+        // Handle tray icon double click
+        tray.on('double-click', () => {
+            if (mainWindow) {
+                mainWindow.show();
+                mainWindow.focus();
+            }
         });
 
-        autoUpdater.on('update-available', (info) => {
-            logDebug('Update available:', info);
-            showNotification(
-                'Update Available', 
-                `Version v${info.version} is available for download`  // Add 'v' prefix
-            );
-            mainWindow?.webContents.send('updateAvailable', info);
-        });
-
-        autoUpdater.on('update-not-available', (info) => {
-            logDebug('Update not available:', info);
-        });
-
-        autoUpdater.on('download-progress', (progressObj) => {
-            logDebug('Download progress:', progressObj);
-        });
-
-        autoUpdater.on('update-downloaded', (info) => {
-            logDebug('Update downloaded:', info);
-            showNotification(
-                'Update Ready', 
-                'A new update is ready to install. Restart the app to apply the update.'
-            );
-            mainWindow?.webContents.send('updateDownloaded', info);
-        });
-
-        autoUpdater.on('error', (err) => {
-            logDebug('Update error:', err);
-            showNotification('Update Error', err.message);
-            mainWindow?.webContents.send('updateError', err.message);
-        });
-
-        app.on('activate', () => {
-            if (BrowserWindow.getAllWindows().length === 0) createWindow();
-        });
     } catch (error) {
-        logDebug('Operation failed:', error);
-        showNotification('Error', error.message);
-        mainWindow?.webContents.send('clipboardError', error.message);
+        logDebug('Failed to create tray:', error);
+        showNotification('Error', 'Failed to create system tray icon');
+    }
+};
+
+// Add tray cleanup to app quit events
+app.on('before-quit', () => {
+    if (tray) {
+        tray.destroy();
+        tray = null;
+    }
+});
+
+// Add single instance lock handler
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    console.log('Another instance is running - quitting');
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        // Someone tried to run a second instance, focus our window instead
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) {
+                mainWindow.restore();
+            }
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+
+    // Update app.whenReady()
+    app.whenReady().then(async () => {
+        try {
+            await initStore();
+            createWindow();
+            createTray();
+            setupIpcHandlers();
+            setupClipboardMonitoring();
+            setupAutoUpdater(); // Add this line
+            globalShortcut.register('CommandOrControl+Shift+C', cloudCopy);
+            globalShortcut.register('CommandOrControl+Shift+V', cloudPaste);
+            registerCustomKeybindings(); // Register custom keybindings on app ready
+
+            if (process.platform === 'darwin') {
+                app.dock.setIcon(path.join(__dirname, 'build/icon.png'));
+            }
+    
+            // Setup auto-updater events
+            autoUpdater.on('checking-for-update', () => {
+                logDebug('Checking for updates...');
+            });
+    
+            autoUpdater.on('update-available', (info) => {
+                logDebug('Update available:', info);
+                showNotification(
+                    'Update Available', 
+                    `Version v${info.version} is available for download`  // Add 'v' prefix
+                );
+                mainWindow?.webContents.send('updateAvailable', info);
+            });
+    
+            autoUpdater.on('update-not-available', (info) => {
+                logDebug('Update not available:', info);
+            });
+    
+            autoUpdater.on('download-progress', (progressObj) => {
+                logDebug('Download progress:', progressObj);
+            });
+    
+            autoUpdater.on('update-downloaded', (info) => {
+                logDebug('Update downloaded:', info);
+                showNotification(
+                    'Update Ready', 
+                    'A new update is ready to install. Restart the app to apply the update.'
+                );
+                mainWindow?.webContents.send('updateDownloaded', info);
+            });
+    
+            autoUpdater.on('error', (err) => {
+                logDebug('Update error:', err);
+                showNotification('Update Error', err.message);
+                mainWindow?.webContents.send('updateError', err.message);
+            });
+    
+            app.on('activate', () => {
+                if (BrowserWindow.getAllWindows().length === 0) createWindow();
+            });
+            
+        } catch (error) {
+            logDebug('Operation failed:', error);
+            showNotification('Error', error.message);
+            mainWindow?.webContents.send('clipboardError', error.message);
+            app.quit();
+        }
+    });
+}
+
+// Update the window-all-closed handler
+app.on('window-all-closed', () => {
+    const settings = getSettings();
+    if (!settings.preferences.runInBackground) {
+        if (tray) {
+            try {
+                tray.destroy();
+                tray = null;
+            } catch (error) {
+                logDebug('Error destroying tray:', error);
+            }
+        }
         app.quit();
     }
 });
 
+// Update the will-quit handler
 app.on('will-quit', () => {
     globalShortcut.unregisterAll();
-});
-
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit();
+    if (tray) {
+        try {
+            tray.destroy();
+            tray = null;
+        } catch (error) {
+            logDebug('Error destroying tray:', error);
+        }
     }
 });
