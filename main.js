@@ -1,7 +1,7 @@
 import Store from 'electron-store';
 import { app, BrowserWindow, globalShortcut, clipboard, ipcMain, dialog, nativeImage, Notification } from 'electron';
 import axios from 'axios';
-import fs from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 import FormData from 'form-data';
 import pkg from 'electron-updater';
@@ -12,6 +12,8 @@ import { io } from 'socket.io-client';
 
 // Add crypto import
 import crypto from 'crypto';
+
+import { tmpdir } from 'os';
 
 const DEFAULT_SETTINGS = {
     apiKey: '',
@@ -676,6 +678,22 @@ async function handleFileDownload(filename) {
     }
 }
 
+// Add this helper function
+async function ensureUpdateDirectories() {
+    const updateDir = path.join(tmpdir(), 'crossy-electron-updater');
+    const pendingDir = path.join(updateDir, 'pending');
+    const tempDir = path.join(updateDir, 'pending-temp');
+    
+    try {
+        await fs.mkdir(updateDir, { recursive: true });
+        await fs.mkdir(pendingDir, { recursive: true });
+        await fs.mkdir(tempDir, { recursive: true });
+    } catch (error) {
+        logDebug('Failed to create update directories:', error);
+    }
+}
+
+// Update the setupAutoUpdater function
 const setupAutoUpdater = () => {
     autoUpdater.logger = {
         info: (msg) => logDebug('Update info:', msg),
@@ -683,39 +701,33 @@ const setupAutoUpdater = () => {
         error: (msg) => logDebug('Update error:', msg)
     };
 
-    // Add error handling for the feed URL
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+
     try {
         autoUpdater.setFeedURL({
             provider: 'github',
             owner: 'Crossy-Clipboard',
-            repo: 'crossy-electron'
+            repo: 'crossy-electron',
+            private: false
         });
     } catch (error) {
         logDebug('Failed to set update feed URL:', error);
     }
 
-    autoUpdater.on('error', (error) => {
-        logDebug('Update error:', error);
-        // Only show notification for non-404 errors
-        if (!error.message.includes('404')) {
-            showNotification(
-                'Update Error', 
-                'There was a problem checking for updates.'
-            );
-        }
-        mainWindow?.webContents.send('updateError', error.message);
+    // Add pre-update check
+    autoUpdater.on('checking-for-update', async () => {
+        logDebug('Checking for updates...');
+        await ensureUpdateDirectories();
     });
 
-    // Add download update handler
-    ipcMain.on('startUpdate', () => {
+    // Update the download handler
+    ipcMain.on('startUpdate', async () => {
         logDebug('Starting update download...');
         try {
+            await ensureUpdateDirectories();
             showNotification('Update', 'Starting download...');
-            autoUpdater.downloadUpdate().catch(err => {
-                logDebug('Download failed:', err);
-                showNotification('Update Error', 'Failed to download update.');
-                mainWindow?.webContents.send('updateError', err.message);
-            });
+            await autoUpdater.downloadUpdate();
         } catch (error) {
             logDebug('Download start failed:', error);
             showNotification('Update Error', 'Could not start download.');
@@ -723,33 +735,39 @@ const setupAutoUpdater = () => {
         }
     });
 
-    // Add download progress handler
-    autoUpdater.on('download-progress', (progressObj) => {
-        const progress = Math.round(progressObj.percent);
-        logDebug(`Download progress: ${progress}%`);
-        mainWindow?.webContents.send('updateProgress', progress);
+    autoUpdater.on('error', async (error) => {
+        logDebug('Update error:', error);
+        
+        // Clean up failed update files
+        try {
+            const updateDir = path.join(tmpdir(), 'crossy-electron-updater');
+            await fs.rm(updateDir, { recursive: true, force: true });
+            await ensureUpdateDirectories();
+        } catch (cleanupError) {
+            logDebug('Cleanup failed:', cleanupError);
+        }
+
+        // Only show notification for non-404 errors
+        if (!error.message.includes('404')) {
+            showNotification(
+                'Update Error', 
+                'There was a problem with the update. Please try again.'
+            );
+        }
+        mainWindow?.webContents.send('updateError', error.message);
     });
 
-    // Add download completion handler 
-    autoUpdater.on('update-downloaded', (info) => {
+    autoUpdater.on('update-downloaded', async (info) => {
         logDebug('Update downloaded:', info);
         showNotification(
             'Update Ready',
-            'Update downloaded. Restart to install.'
+            'Update downloaded. The app will update on next restart.'
         );
         mainWindow?.webContents.send('updateDownloaded', info);
     });
-
-    // Update in setupAutoUpdater() function
-    autoUpdater.on('update-available', (info) => {
-        logDebug('Update available:', info);
-        showNotification(
-            'Update Available', 
-            `Version v${info.version} is available for download`  // Add 'v' prefix
-        );
-        mainWindow?.webContents.send('updateAvailable', info);
-    });
 };
+
+
 
 const registerCustomKeybindings = () => {
     const settings = getSettings();
