@@ -88,19 +88,27 @@ function logInfo(message, ...args) {
     console.log(`[INFO] ${message}`, ...args);
 }
 
-// Add to existing showNotification function
+// Update the showNotification function with safety checks
 function showNotification(title, body) {
-    const settings = getSettings();
-    if (settings.preferences.notifications) {
-        // Use system notification
-        new Notification({ 
-            title, 
-            body,
-            silent: false
-        }).show();
+    try {
+        const settings = getSettings();
+        if (settings.preferences.notifications && !app.isQuitting) {
+            // Check if app is not being destroyed
+            if (Notification.isSupported()) {
+                new Notification({ 
+                    title, 
+                    body,
+                    silent: false
+                }).show();
+            }
+        }
+        // Only try to send to window if it exists and is not destroyed
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('showInAppNotification', { title, body });
+        }
+    } catch (error) {
+        logDebug('Failed to show notification:', error);
     }
-    // Always send in-app notification
-    mainWindow?.webContents.send('showInAppNotification', { title, body });
 }
 
 const initStore = () => {
@@ -775,20 +783,21 @@ const setupAutoUpdater = () => {
         // Clean up failed update files
         try {
             const updateDir = path.join(tmpdir(), 'crossy-electron-updater');
-            await fs.rm(updateDir, { recursive: true, force: true });
-            await ensureUpdateDirectories();
+            await fs.rm(updateDir, { recursive: true, force: true }).catch(() => {});
         } catch (cleanupError) {
             logDebug('Cleanup failed:', cleanupError);
         }
 
-        // Only show notification for non-404 errors
-        if (!error.message.includes('404')) {
-            showNotification(
-                'Update Error', 
-                'There was a problem with the update. Please try again.'
-            );
+        // Only show notification if app is not quitting
+        if (!app.isQuitting && !error.message.includes('404')) {
+            try {
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('updateError', error.message);
+                }
+            } catch (notifyError) {
+                logDebug('Failed to send update error to window:', notifyError);
+            }
         }
-        mainWindow?.webContents.send('updateError', error.message);
     });
 
     autoUpdater.on('update-downloaded', async (info) => {
@@ -1048,14 +1057,6 @@ const createTray = () => {
     }
 };
 
-// Add tray cleanup to app quit events
-app.on('before-quit', () => {
-    if (tray) {
-        tray.destroy();
-        tray = null;
-    }
-});
-
 // Add single instance lock handler
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -1140,10 +1141,20 @@ if (!gotTheLock) {
     });
 }
 
-// Update the window-all-closed handler
-app.on('window-all-closed', () => {
-    const settings = getSettings();
-    if (!settings.preferences.runInBackground) {
+// Add cleanup handling
+let isCleaningUp = false;
+
+const cleanup = async () => {
+    if (isCleaningUp) return;
+    isCleaningUp = true;
+    
+    try {
+        app.isQuitting = true;
+        
+        // Unregister shortcuts
+        globalShortcut.unregisterAll();
+        
+        // Destroy tray
         if (tray) {
             try {
                 tray.destroy();
@@ -1152,19 +1163,57 @@ app.on('window-all-closed', () => {
                 logDebug('Error destroying tray:', error);
             }
         }
+        
+        // Clear update directory
+        try {
+            const updateDir = path.join(tmpdir(), 'crossy-electron-updater');
+            await fs.rm(updateDir, { recursive: true, force: true }).catch(() => {});
+        } catch (error) {
+            logDebug('Error cleaning update directory:', error);
+        }
+        
+        // Close socket connection
+        if (socket) {
+            socket.disconnect();
+            socket = null;
+        }
+        
+        // Clear monitoring interval
+        if (clipboardMonitoringInterval) {
+            clearInterval(clipboardMonitoringInterval);
+            clipboardMonitoringInterval = null;
+        }
+    } catch (error) {
+        logDebug('Error during cleanup:', error);
+    } finally {
+        isCleaningUp = false;
+    }
+};
+
+// Update quit handlers
+app.on('before-quit', async (event) => {
+    if (!isCleaningUp) {
+        event.preventDefault();
+        await cleanup();
         app.quit();
     }
 });
 
-// Update the will-quit handler
-app.on('will-quit', () => {
-    globalShortcut.unregisterAll();
-    if (tray) {
-        try {
-            tray.destroy();
-            tray = null;
-        } catch (error) {
-            logDebug('Error destroying tray:', error);
+app.on('will-quit', async (event) => {
+    if (!isCleaningUp) {
+        event.preventDefault();
+        await cleanup();
+        app.quit();
+    }
+});
+
+// Update the window-all-closed handler
+app.on('window-all-closed', async () => {
+    const settings = getSettings();
+    if (!settings.preferences.runInBackground) {
+        if (!isCleaningUp) {
+            await cleanup();
+            app.quit();
         }
     }
 });
