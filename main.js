@@ -505,17 +505,6 @@ const cloudCopy = async () => {
         await cloudCopyFile(tempPath);
         fs.unlinkSync(tempPath);
         mainWindow?.webContents.send('triggerRefresh');
-        
-        // After successful copy, emit update event
-        if (socket?.connected) {
-            socket.emit('clipboard_update', null, (error) => {
-                if (error) {
-                    logDebug('Failed to send clipboard update:', error);
-                } else {
-                    logDebug('Clipboard update sent successfully');
-                }
-            });
-        }
         return;
     }
 
@@ -532,16 +521,6 @@ const cloudCopy = async () => {
             });
             mainWindow?.webContents.send('triggerRefresh');
             showNotification('Clipboard Synced', 'Text copied to cloud clipboard');
-            
-            if (socket?.connected) {
-                socket.emit('clipboard_update', null, (error) => {
-                    if (error) {
-                        logDebug('Failed to send clipboard update:', error);
-                    } else {
-                        logDebug('Clipboard update sent successfully');
-                    }
-                });
-            }
         } catch (error) {
             logDebug('Operation failed:', error);
             showNotification('Error', error.message);
@@ -566,17 +545,6 @@ const cloudCopy = async () => {
             if (fs.existsSync(filePath)) {
                 await cloudCopyFile(filePath);
                 mainWindow?.webContents.send('triggerRefresh');
-                
-                // After successful copy, emit update event
-                if (socket?.connected) {
-                    socket.emit('clipboard_update', null, (error) => {
-                        if (error) {
-                            logDebug('Failed to send clipboard update:', error);
-                        } else {
-                            logDebug('Clipboard update sent successfully');
-                        }
-                    });
-                }
             } else {
                 console.error('File not found:', filePath);
             }
