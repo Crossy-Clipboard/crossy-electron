@@ -18,12 +18,16 @@
     <div class="main-content">
         <div class="clipboard-content">
             <div id="clipboardInfo">
-                <p id="clipboardType"></p>
                 <p id="clipboardText">Loading clipboard content...</p>
             </div>
-            <button onclick="manualRefresh()">Refresh</button>
-            <div style="margin-top: 20px;">
-                <button id="downloadButton" style="display: none;" onclick="handleFileDownload()">Download to...</button>
+            <div class="bottom-controls">
+                <div class="left-side">
+                    <button id="downloadButton" style="display: none;" onclick="handleFileDownload()">Download to...</button>
+                </div>
+                <div class="right-side">
+                    <p id="clipboardType"></p>
+                    <button onclick="manualRefresh()">Refresh</button>
+                </div>
             </div>
         </div>
     </div>
