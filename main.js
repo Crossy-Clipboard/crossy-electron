@@ -1,7 +1,7 @@
 import Store from 'electron-store';
 import { app, BrowserWindow, globalShortcut, clipboard, ipcMain, dialog, nativeImage, Notification, Tray, Menu } from 'electron';
 import axios from 'axios';
-import fs from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
 import pkg from 'electron-updater';
