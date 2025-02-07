@@ -112,11 +112,11 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/**/*.exe
-            artifacts/**/*.dmg
-            artifacts/**/*.AppImage
-            artifacts/**/*.deb
-            artifacts/**/*.rpm
+            artifacts/**/Crossy.Clipboard.Setup.${{ needs.prepare.outputs.version }}.exe
+            artifacts/**/Crossy.Clipboard.Setup.${{ needs.prepare.outputs.version }}.dmg
+            artifacts/**/Crossy.Clipboard.Setup.${{ needs.prepare.outputs.version }}.AppImage
+            artifacts/**/Crossy.Clipboard.Setup.${{ needs.prepare.outputs.version }}.deb
+            artifacts/**/Crossy.Clipboard.Setup.${{ needs.prepare.outputs.version }}.rpm
             artifacts/**/latest*.yml
             artifacts/**/*-latest.yml
           name: "Release v${{ needs.prepare.outputs.version }}"
