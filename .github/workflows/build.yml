@@ -112,7 +112,11 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/**/*
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
             artifacts/**/latest*.yml
             artifacts/**/*-latest.yml
           name: "Release v${{ needs.prepare.outputs.version }}"
