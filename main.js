@@ -998,7 +998,7 @@ const createTray = () => {
                 click: () => {
                     mainWindow?.show();
                     mainWindow?.focus();
-                    mainWindow?.webContents.send('showSettings');
+                    mainWindow?.loadFile('settings.html');
                 }
             },
             { type: 'separator' },
