@@ -26,8 +26,14 @@
                 </div>
                 <div class="right-side">
                     <p id="clipboardType"></p>
-                    <button class="icon-button" onclick="manualRefresh()">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <button id="copyButton" class="icon-button" style="display: none;" onclick="copyToClipboard()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
+                    <button id="refreshButton" class="icon-button" style="display: none;" onclick="manualRefresh()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M23 4v6h-6"></path>
                             <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"></path>
                         </svg>
@@ -40,12 +46,10 @@
     <div class="notification-container" id="notificationContainer"></div>
 
     <script>
-        const { ipcRenderer } = require('electron');
+        const { ipcRenderer, clipboard } = require('electron');
         
-        // Add at the top of <script> section
         let currentFilename = '';
 
-        // Load settings from main process
         async function loadSettings() {
             const settings = await ipcRenderer.invoke('getSettings');
             const theme = settings.theme;
@@ -55,12 +59,15 @@
             document.documentElement.style.setProperty('--bg-color', theme.bgColor);
             document.documentElement.style.setProperty('--surface-color', theme.surfaceColor);
             document.documentElement.style.setProperty('--text-color', theme.textColor);
+
+            // Show or hide refresh button based on automatic mode setting
+            const refreshButton = document.getElementById('refreshButton');
+            refreshButton.style.display = settings.preferences.automaticClipboardSync ? 'none' : 'inline-block';
         }
 
         let lastRefreshTime = 0;
-        const REFRESH_DEBOUNCE = 1000; // 1 second minimum between refreshes
+        const REFRESH_DEBOUNCE = 1000;
 
-        // Update fetchClipboardContent() to store filename and add error handling:
         const fetchClipboardContent = async () => {
             const now = Date.now();
             if (now - lastRefreshTime < REFRESH_DEBOUNCE) return;
@@ -78,34 +85,37 @@
                 const typeEl = document.getElementById('clipboardType');
                 const textEl = document.getElementById('clipboardText');
                 const downloadButton = document.getElementById('downloadButton');
+                const copyButton = document.getElementById('copyButton');
 
                 if (contentType.includes('application/json')) {
                     const data = await response.json();
                     typeEl.textContent = `Type: ${data.type}`;
                     textEl.textContent = data.type === 'text' ? data.content : '';
                     downloadButton.style.display = 'none';
+                    copyButton.style.display = data.type === 'text' ? 'inline-block' : 'none';
                 } else if (contentType.startsWith('image/')) {
                     const format = contentType.split('/')[1];
                     typeEl.textContent = 'Type: image';
                     textEl.textContent = `Format: ${format}`;
                     downloadButton.style.display = 'inline-block';
+                    copyButton.style.display = 'none';
                 } else {
                     const filename = response.headers.get('content-disposition')
                         ?.split('filename=')[1]?.replace(/"/g, '') || 'file';
-                    currentFilename = filename; // Store filename for later use
+                    currentFilename = filename;
                     typeEl.textContent = 'Type: file';
                     textEl.textContent = `Filename: ${filename}`;
                     downloadButton.style.display = 'inline-block';
+                    copyButton.style.display = 'none';
                 }
             } catch (error) {
                 document.getElementById('clipboardType').textContent = 'Error';
                 document.getElementById('clipboardText').textContent = 
                     `Failed to fetch clipboard content: ${error.message}`;
                 document.getElementById('downloadButton').style.display = 'none';
+                document.getElementById('copyButton').style.display = 'none';
             }
         };
-
-        // Replace the existing handleFileDownload() function with:
 
         async function handleFileDownload() {
             try {
@@ -120,7 +130,6 @@
             }
         }
 
-        // Notification management
         function createNotification(title, body) {
             const container = document.getElementById('notificationContainer');
             const notification = document.createElement('div');
@@ -134,7 +143,6 @@
 
             container.appendChild(notification);
 
-            // Remove notification after 5 seconds
             setTimeout(() => {
                 notification.classList.add('fade-out');
                 setTimeout(() => {
@@ -143,36 +151,30 @@
             }, 5000);
         }
 
-        // Listen for notification events from main process
         ipcRenderer.on('showInAppNotification', (event, { title, body }) => {
             createNotification(title, body);
         });
 
-        // Load settings on startup
         loadSettings();
 
-        // Add event listener for refresh trigger
         ipcRenderer.on('triggerRefresh', () => {
             fetchClipboardContent();
         });
 
-        // Add error event listener
         ipcRenderer.on('clipboardError', (event, message) => {
             document.getElementById('clipboardType').textContent = 'Error';
             document.getElementById('clipboardText').textContent = 
                 `Clipboard operation failed: ${message}`;
             document.getElementById('downloadButton').style.display = 'none';
+            document.getElementById('copyButton').style.display = 'none';
         });
 
-        // Initial fetch on page load
         fetchClipboardContent();
 
-        // Add event listener for update button
         document.getElementById('updateButton').addEventListener('click', () => {
             ipcRenderer.send('checkForUpdates');
         });
 
-        // Fetch and display version info
         ipcRenderer.invoke('getVersionInfo').then(version => {
             document.getElementById('versionInfo').textContent = `Version: ${version}`;
         });
@@ -180,6 +182,12 @@
         async function manualRefresh() {
             await fetchClipboardContent();
             ipcRenderer.send('manualRefresh');
+        }
+
+        function copyToClipboard() {
+            const text = document.getElementById('clipboardText').textContent;
+            clipboard.writeText(text);
+            createNotification('Copied', 'Text copied to clipboard');
         }
     </script>
 </body>

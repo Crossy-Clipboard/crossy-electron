@@ -54,7 +54,10 @@ button.icon-button {
     border: none;
     cursor: pointer;
     font-size: 20px;
-    padding: 5px;
+    padding-top: 5px;
+    padding-bottom: 0px;
+    padding-left: 5px;
+    padding-right: 5px;
 }
 
 button.icon-button:hover {
@@ -74,10 +77,9 @@ button.icon-button:hover {
     font-size: 14px;
 }
 
-#copyButton {
-    padding: 10px 20px;
-    font-size: 16px;
-    margin-top: 10px;
+#clipboardInfo {
+    border: 4px dashed var(--bg-color);
+    border-radius: 8px;
 }
 
 .settings-container {
@@ -143,7 +145,10 @@ input[readonly]:focus {
     min-height: 25vh;
     max-width: 600px;
     background-color: var(--surface-color);
-    padding: 20px;
+    padding-top: 20px;
+    padding-bottom: 10px;
+    padding-left: 20px;
+    padding-right: 20px;
     border-radius: 8px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
     display: flex;
@@ -161,7 +166,6 @@ input[readonly]:focus {
     align-items: center;
     width: 100%;
     margin-top: auto;
-    padding-top: 20px;
     margin-bottom: -10px;
 }
 
@@ -175,16 +179,6 @@ input[readonly]:focus {
     align-items: center;
     gap: 15px;
 }
-
-/* Remove or comment out these classes as they're no longer needed
-.bottom-controls.left-bound {
-    justify-content: left;
-}
-
-.bottom-controls.right-bound {
-    justify-content: right;
-}
-*/
 
 #clipboardType {
     font-size: 0.9em;
