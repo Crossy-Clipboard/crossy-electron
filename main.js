@@ -837,6 +837,11 @@ const setupWebSocket = () => {
                 attempt: wsConnectionState.retryCount + 1
             });
 
+            // Clear any existing ping interval
+            if (socket.pingInterval) {
+                clearInterval(socket.pingInterval);
+            }
+
             if (wsConnectionState.retryCount < wsConnectionState.maxRetries) {
                 wsConnectionState.retryCount++;
                 logDebug(`Retrying connection (${wsConnectionState.retryCount}/${wsConnectionState.maxRetries})`);
@@ -914,7 +919,24 @@ function connectSocket(settings, appKey) {
         reconnectionAttempts: 3,
         reconnectionDelay: 1000,
         timeout: 5000,
-        forceNew: true
+        forceNew: true,
+        pingTimeout: 30000,    // How long to wait for pong
+        pingInterval: 25000    // How often to ping
+    });
+
+    // Add keepalive ping
+    const pingInterval = setInterval(() => {
+        if (socket.connected) {
+            socket.emit('ping');
+        }
+    }, 25000);
+
+    socket.on('pong', () => {
+        logDebug('Received pong from server');
+    });
+
+    socket.on('disconnect', () => {
+        clearInterval(pingInterval);
     });
 
     return socket;
