@@ -186,58 +186,21 @@
 
         async function manualRefresh() {
             try {
-                const settings = await ipcRenderer.invoke('getSettings');
-                const appKey = await ipcRenderer.invoke('getApiKey');
+                const clipboardInfo = document.getElementById('clipboardInfo');
+                const clipboardText = document.getElementById('clipboardText');
+                const oldContent = clipboardText.textContent;
                 
-                console.log('Starting manual refresh...');
+                // Show loading state
+                clipboardText.textContent = '...';
                 
-                // First get local timestamp to ensure accurate comparison
-                const localTimestamp = await ipcRenderer.invoke('getLastLocalTimestamp');
-                
-                // Then get cloud content and timestamp
-                const response = await fetch(`${settings.apiBaseUrl}/app/paste/latest`, {
-                    headers: { 
-                        'AppKey': appKey.trim(),
-                        'Accept': 'application/json'
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const cloudData = await response.json();
-                const cloudTimestamp = new Date(cloudData.timestamp).getTime();
-                
-                console.log('Timestamps:', {
-                    cloud: new Date(cloudTimestamp).toISOString(),
-                    local: new Date(localTimestamp).toISOString()
-                });
-
-                // Ensure we're comparing numbers, not strings
-                const cloudTime = Number(cloudTimestamp);
-                const localTime = Number(localTimestamp);
-
-                if (cloudTime > localTime) {
-                    console.log('Cloud content is newer - downloading');
-                    await ipcRenderer.invoke('downloadCloudContent');
-                    // createNotification('Synced', 'Downloaded newer content from cloud');
-                } else if (localTime > cloudTime) {
-                    console.log('Local content is newer - uploading');
-                    await ipcRenderer.invoke('uploadLocalContent');
-                    // createNotification('Synced', 'Uploaded local content to cloud');
-                } else {
-                    console.log('Content is already in sync');
-                    // createNotification('Synced', 'Clipboard already up-to-date');
-                    return;
-                }
-                
-                // Refresh the display after sync
                 await fetchClipboardContent();
-                
+                createNotification('Display Refreshed', 'Updated view of cloud clipboard');
             } catch (error) {
-                console.error('Refresh failed:', error);
-                createNotification('Error', `Refresh failed: ${error.message}`);
+                console.error('Display refresh failed:', error);
+                document.getElementById('clipboardType').textContent = 'Error';
+                document.getElementById('clipboardText').textContent = 
+                    `Failed to refresh display: ${error.message}`;
+                createNotification('Error', `Display refresh failed: ${error.message}`);
             }
         }
 

@@ -77,6 +77,74 @@ let lastOperation = {
     type: null
 };
 
+// Update timestamp constants and tracking near the top
+const TIMESTAMP_CONFIG = {
+    DEBOUNCE_DELAY: 1000,        // 1 second
+    MIN_SYNC_INTERVAL: 2000,     // 2 seconds
+    MAX_SYNC_AGE: 30000,         // 30 seconds
+    CLOUD_CHECK_INTERVAL: 5000   // 5 seconds - how often to check cloud changes
+};
+
+// Fix the syncState object by adding the missing closing brace and improving state handling
+const syncState = {
+    lastLocal: Date.now(),
+    lastCloud: Date.now(),
+    lastSync: Date.now(),
+    lastCheck: Date.now(),
+    cloudHash: '',
+    localHash: '',
+    lastOperation: {
+        type: null,
+        timestamp: 0
+    },
+    isProcessing: false, // Add lock mechanism 
+    updateLocal(content) {
+        this.lastLocal = Date.now();
+        this.localHash = content ? hashContent(content) : '';
+        logDebug('Local state updated:', {
+            timestamp: new Date(this.lastLocal).toISOString(),
+            hash: this.localHash
+        });
+    },
+    updateCloud(timestamp, content) {
+        this.lastCloud = timestamp || Date.now();
+        this.lastCheck = Date.now();
+        this.cloudHash = content ? hashContent(content) : '';
+        logDebug('Cloud state updated:', {
+            timestamp: new Date(this.lastCloud).toISOString(),
+            hash: this.cloudHash
+        });
+    },
+    updateSync() {
+        this.lastSync = Date.now();
+        logDebug('Sync timestamp updated:', new Date(this.lastSync).toISOString());
+    },
+    async beginProcessing() {
+        if (this.isProcessing) {
+            return false;
+        }
+        this.isProcessing = true;
+        return true;
+    },
+    endProcessing() {
+        this.isProcessing = false;
+    },
+    shouldSync() {
+        if (this.isProcessing) {
+            return false;
+        }
+        const now = Date.now();
+        return now - this.lastSync >= TIMESTAMP_CONFIG.MIN_SYNC_INTERVAL &&
+               now - this.lastOperation.timestamp >= TIMESTAMP_CONFIG.DEBOUNCE_DELAY;
+    },
+    hasCloudChanged() {
+        return this.cloudHash !== this.localHash;
+    },
+    shouldCheckCloud() {
+        return Date.now() - this.lastCheck >= TIMESTAMP_CONFIG.CLOUD_CHECK_INTERVAL;
+    }
+}; // Add missing closing brace
+
 function logDebug(message, ...args) {
     const settings = getSettings();
     if (settings.preferences.debugLogging) {
@@ -364,6 +432,17 @@ const setupIpcHandlers = () => {
             throw error;
         }
     });
+
+    ipcMain.handle('syncClipboard', async () => {
+        try {
+            // Simply trigger a display refresh without modifying clipboards
+            mainWindow?.webContents.send('triggerRefresh');
+            return { success: true };
+        } catch (error) {
+            logDebug('Display refresh failed:', error);
+            throw error;
+        }
+    });
 };
 
 // Add this to preserve the window instance when closing
@@ -405,7 +484,7 @@ const createWindow = () => {
     });
 };
 
-// Replace setupClipboardMonitoring function
+// Update the clipboard monitoring function to use the new lock mechanism
 const setupClipboardMonitoring = () => {
     logDebug('Setting up clipboard monitoring...');
     
@@ -423,58 +502,81 @@ const setupClipboardMonitoring = () => {
 
     setupWebSocket();
 
-    clipboardMonitoringInterval = setInterval(() => {
+    clipboardMonitoringInterval = setInterval(async () => {
         if (!socket?.connected) {
             logDebug('Skipping clipboard check - no connection');
             return;
         }
 
-        const now = Date.now();
-        if (now - lastOperation.timestamp < DEBOUNCE_DELAY) {
-            return;
-        }
-
         try {
-            const currentText = clipboard.readText();
-            const currentImage = clipboard.readImage();
-            let hasChanged = false;
+            // Try to acquire lock
+            if (!await syncState.beginProcessing()) {
+                logDebug('Skipping clipboard check - sync in progress');
+                return;
+            }
 
-            if (currentText && currentText !== lastClipboardContent.text) {
-                lastClipboardContent.text = currentText;
-                lastClipboardContent.timestamp = now;
-                hasChanged = true;
-            }
-            
-            if (!currentImage.isEmpty() && 
-                currentImage.toDataURL() !== lastClipboardContent.image) {
-                lastClipboardContent.image = currentImage.toDataURL();
-                lastClipboardContent.timestamp = now;
-                hasChanged = true;
-            }
-            
             try {
-                const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
-                const filePaths = rawFilePaths
-                    .split('\0')
-                    .filter(Boolean)
-                    .map(fp => fp.replace(/\\/g, '\\'));
-                    
-                if (filePaths[0] && filePaths[0] !== lastClipboardContent.filePath) {
-                    lastClipboardContent.filePath = filePaths[0];
-                    lastClipboardContent.timestamp = now;
-                    hasChanged = true;
-                }
-            } catch (error) {
-                // Ignore file reading errors
-            }
+                // Check for local changes
+                const currentText = clipboard.readText();
+                const currentImage = clipboard.readImage();
+                let hasLocalChanges = false;
 
-            if (hasChanged) {
-                lastLocalClipboardTimestamp = now;
-                lastOperation = { timestamp: now, type: 'copy' };
-                cloudCopy();
+                // Handle local changes
+                if (currentText && currentText !== lastClipboardContent.text) {
+                    syncState.updateLocal(currentText);
+                    hasLocalChanges = true;
+                }
+                
+                if (!currentImage.isEmpty() && 
+                    currentImage.toDataURL() !== lastClipboardContent.image) {
+                    syncState.updateLocal(currentImage.toPNG());
+                    hasLocalChanges = true;
+                }
+
+                // Check for cloud changes periodically
+                if (syncState.shouldCheckCloud()) {
+                    try {
+                        const settings = getSettings();
+                        const appKey = getAppKey();
+                        
+                        const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
+                            headers: { 
+                                'AppKey': appKey,
+                                'Accept': 'application/json'
+                            }
+                        });
+
+                        if (response.data) {
+                            syncState.updateCloud(
+                                new Date(response.data.timestamp).getTime(),
+                                response.data.content
+                            );
+
+                            if (syncState.hasCloudChanged()) {
+                                logDebug('Cloud content changed - downloading');
+                                await cloudPaste();
+                            }
+                        }
+                    } catch (error) {
+                        logDebug('Cloud check failed:', error);
+                    }
+                }
+
+                // Upload local changes if needed
+                if (hasLocalChanges && syncState.shouldSync()) {
+                    syncState.lastOperation = { 
+                        timestamp: Date.now(),
+                        type: 'copy'
+                    };
+                    await cloudCopy();
+                }
+            } finally {
+                // Always release lock
+                syncState.endProcessing();
             }
         } catch (error) {
             logDebug('Clipboard monitoring error:', error);
+            syncState.endProcessing(); // Ensure lock is released on error
         }
     }, 1000);
 };
@@ -486,9 +588,8 @@ function hashContent(content) {
 
 // Update the cloudCopy function's WebSocket notification
 const cloudCopy = async () => {
-    const now = Date.now();
-    if (now - lastDownloadedContent.timestamp < lastDownloadedContent.debounceDelay) {
-        logDebug('Skipping upload - too soon after download');
+    if (!syncState.shouldSync()) {
+        logDebug('Skipping upload - too soon after last operation');
         return;
     }
 
@@ -496,62 +597,77 @@ const cloudCopy = async () => {
     const settings = getSettings();
     if (!appKey) return;
     
-    const image = clipboard.readImage();
-    if (!image.isEmpty()) {
-        const imageHash = hashContent(image.toPNG());
-        if (imageHash === lastDownloadedContent.imageHash) {
-            logDebug('Skipping upload - image matches last download');
-            return;
+    try {
+        syncState.lastOperation = {
+            type: 'upload',
+            timestamp: Date.now()
+        };
+        
+        let uploaded = false;
+        const image = clipboard.readImage();
+        
+        if (!image.isEmpty()) {
+            const imageHash = hashContent(image.toPNG());
+            if (imageHash === lastDownloadedContent.imageHash) {
+                logDebug('Skipping upload - image matches last download');
+                return;
+            }
+            const tempPath = path.join(app.getPath('temp'), `clipboard-${Date.now()}.png`);
+            fs.writeFileSync(tempPath, image.toPNG());
+            await cloudCopyFile(tempPath);
+            fs.unlinkSync(tempPath);
+            uploaded = true;
         }
-        const tempPath = path.join(app.getPath('temp'), `clipboard-${Date.now()}.png`);
-        fs.writeFileSync(tempPath, image.toPNG());
-        await cloudCopyFile(tempPath);
-        fs.unlinkSync(tempPath);
-        mainWindow?.webContents.send('triggerRefresh');
-        return;
-    }
 
-    const text = clipboard.readText();
-    if (text) {
-        const textHash = hashContent(text);
-        if (textHash === lastDownloadedContent.textHash) {
-            logDebug('Skipping upload - text matches last download');
+        const text = clipboard.readText();
+        if (text && !uploaded) {
+            const textHash = hashContent(text);
+            if (textHash === lastDownloadedContent.textHash) {
+                logDebug('Skipping upload - text matches last download');
+                return;
+            }
+            try {
+                await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
+                    headers: { AppKey: appKey },
+                });
+                mainWindow?.webContents.send('triggerRefresh');
+                showNotification('Clipboard Uploaded', 'Text copied to cloud clipboard');
+            } catch (error) {
+                logDebug('Operation failed:', error);
+                showNotification('Error', error.message);
+                mainWindow?.webContents.send('clipboardError', error.message);
+            }
             return;
         }
+
         try {
-            await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
-                headers: { AppKey: appKey },
-            });
-            mainWindow?.webContents.send('triggerRefresh');
-            showNotification('Clipboard Uploaded', 'Text copied to cloud clipboard');
+            const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
+            const filePaths = rawFilePaths
+                .split('\0')
+                .filter(Boolean)
+                .map(fp => fp.replace(/\\/g, '\\'));
+            
+            if (filePaths.length > 0) {
+                const filePath = filePaths[0];
+                if (filePath && filePath === lastDownloadedContent.filePath) {
+                    logDebug('Skipping upload - file matches last download');
+                    return;
+                }
+                if (fs.existsSync(filePath)) {
+                    await cloudCopyFile(filePath);
+                    mainWindow?.webContents.send('triggerRefresh');
+                } else {
+                    console.error('File not found:', filePath);
+                }
+            }
         } catch (error) {
             logDebug('Operation failed:', error);
             showNotification('Error', error.message);
             mainWindow?.webContents.send('clipboardError', error.message);
         }
-        return;
-    }
 
-    try {
-        const rawFilePaths = clipboard.readBuffer('FileNameW').toString('ucs2');
-        const filePaths = rawFilePaths
-            .split('\0')
-            .filter(Boolean)
-            .map(fp => fp.replace(/\\/g, '\\'));
-        
-        if (filePaths.length > 0) {
-            const filePath = filePaths[0];
-            if (filePath && filePath === lastDownloadedContent.filePath) {
-                logDebug('Skipping upload - file matches last download');
-                return;
-            }
-            if (fs.existsSync(filePath)) {
-                await cloudCopyFile(filePath);
-                mainWindow?.webContents.send('triggerRefresh');
-            } else {
-                console.error('File not found:', filePath);
-            }
-        }
+        syncState.updateLocal();
+        mainWindow?.webContents.send('triggerRefresh');
     } catch (error) {
         logDebug('Operation failed:', error);
         showNotification('Error', error.message);
@@ -595,15 +711,29 @@ const cloudCopyFile = async (filePath) => {
 
 // Update cloudPaste to track downloaded content
 const cloudPaste = async () => {
+    if (!syncState.shouldSync()) {
+        logDebug('Skipping download - too soon after last operation');
+        return;
+    }
+
     const appKey = getAppKey();
     const settings = getSettings();
     if (!appKey) return;
 
     try {
+        syncState.lastOperation = {
+            type: 'download',
+            timestamp: Date.now()
+        };
+
         const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
             headers: { AppKey: appKey },
             responseType: 'json'
         });
+
+        if (response.data.timestamp) {
+            syncState.updateCloud(new Date(response.data.timestamp).getTime(), response.data.content);
+        }
 
         if (response.data.type === 'text') {
             const textContent = response.data.content;
@@ -645,6 +775,7 @@ const cloudPaste = async () => {
             clipboard.writeBuffer('FileNameW', Buffer.from(tempPath + '\0', 'ucs2'));
         }
 
+        syncState.updateSync();
         mainWindow?.webContents.send('refreshClipboard');
     } catch (error) {
         logDebug('Operation failed:', error);
@@ -652,44 +783,6 @@ const cloudPaste = async () => {
         mainWindow?.webContents.send('clipboardError', error.message);
     }
 };
-
-async function handleLatestContent() {
-    try {
-        const response = await fetch(`${settings.apiBaseUrl}/app/paste/latest`, {
-            headers: { AppKey: localStorage.getItem('appKey') }
-        });
-        
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        
-        const filename = response.headers.get('content-disposition')
-            ?.split('filename=')[1]?.replace(/"/g, '') || 'clipboard.txt';
-        logDebug('Extracted filename:', filename);
-        
-        const content = await response.text();
-        document.getElementById('clipboardText').textContent = content;
-        
-        const downloadBtn = document.getElementById('downloadBtn');
-        downloadBtn.onclick = () => handleFileDownload(filename);
-    } catch (error) {
-        logDebug('Operation failed:', error);
-        showNotification('Error', error.message);
-        mainWindow?.webContents.send('clipboardError', error.message);
-    }
-}
-
-async function handleFileDownload(filename) {
-    try {
-        logDebug('Initiating download with filename:', filename);
-        const success = await window.electronAPI.downloadFile(filename);
-        if (success) {
-            document.getElementById('clipboardText').textContent = 'File downloaded successfully!';
-        }
-    } catch (error) {
-        logDebug('Operation failed:', error);
-        showNotification('Error', error.message);
-        mainWindow?.webContents.send('clipboardError', error.message);
-    }
-}
 
 // Add this helper function
 async function ensureUpdateDirectories() {
@@ -873,18 +966,37 @@ const setupWebSocket = () => {
         socket.on('clipboard_update', async () => {
             logDebug('Received clipboard_update event');
             
-            // Check if we just performed an operation
-            const now = Date.now();
-            if (now - lastOperation.timestamp < DEBOUNCE_DELAY) {
+            if (!syncState.shouldSync()) {
                 logDebug('Skipping clipboard update - too soon after last operation');
                 return;
             }
 
             try {
-                await cloudPaste(); // Fetch and apply latest content
-                lastOperation = { timestamp: now, type: 'paste' };
-                mainWindow?.webContents.send('triggerRefresh'); // Update UI
-                // showNotification('Clipboard Updated', 'New content received');
+                const settings = getSettings();
+                const appKey = getAppKey();
+                
+                const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
+                    headers: { 
+                        'AppKey': appKey,
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (response.data) {
+                    syncState.updateCloud(
+                        new Date(response.data.timestamp).getTime(),
+                        response.data.content
+                    );
+
+                    if (syncState.hasCloudChanged()) {
+                        await cloudPaste();
+                        syncState.lastOperation = { 
+                            timestamp: Date.now(),
+                            type: 'paste'
+                        };
+                        mainWindow?.webContents.send('triggerRefresh');
+                    }
+                }
             } catch (error) {
                 logDebug('Failed to handle clipboard update:', error);
                 showNotification('Error', 'Failed to sync latest clipboard content');
