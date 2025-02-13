@@ -8,9 +8,9 @@
 </head>
 <body>
     <div class="header">
-        <h1>Crossy Clipboard</h1>
-        <div>
-            <span id="versionInfo" style="margin-right: 15px;"></span>
+        <h1 class="left-side">Crossy Clipboard  <span id="versionInfo"></span></h1>
+        
+        <div class="right-side">
             <button onclick="window.location.href='settings.html'">Settings</button>
         </div>
     </div>
@@ -30,6 +30,13 @@
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
+                    <button id="uploadButton" class="icon-button" onclick="manualPasteUpload()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
                         </svg>
                     </button>
                     <button id="refreshButton" class="icon-button" style="display: none;" onclick="manualRefresh()">
@@ -62,7 +69,11 @@
 
             // Show or hide refresh button based on automatic mode setting
             const refreshButton = document.getElementById('refreshButton');
+            const uploadButton = document.getElementById('uploadButton');
+            const copyButton = document.getElementById('copyButton');
             refreshButton.style.display = settings.preferences.automaticClipboardSync ? 'none' : 'inline-block';
+            uploadButton.style.display = settings.preferences.automaticClipboardSync ? 'none' : 'inline-block';
+            copyButton.style.display = settings.preferences.automaticClipboardSync ? 'none' : 'inline-block';
         }
 
         let lastRefreshTime = 0;
@@ -93,7 +104,6 @@
                     typeEl.textContent = `Type: ${data.type}`;
                     textEl.textContent = data.content;
                     downloadButton.style.display = 'none';
-                    copyButton.style.display = 'inline-block';
                 } 
                 // Handle file/image responses
                 else {
@@ -118,7 +128,6 @@
                 document.getElementById('clipboardText').textContent = 
                     `Failed to fetch clipboard content: ${error.message}`;
                 document.getElementById('downloadButton').style.display = 'none';
-                document.getElementById('copyButton').style.display = 'none';
             }
         };
 
@@ -172,6 +181,7 @@
                 `Clipboard operation failed: ${message}`;
             document.getElementById('downloadButton').style.display = 'none';
             document.getElementById('copyButton').style.display = 'none';
+            document.getElementById('uploadButton').style.display = 'none';
         });
 
         fetchClipboardContent();
@@ -181,7 +191,7 @@
         });
 
         ipcRenderer.invoke('getVersionInfo').then(version => {
-            document.getElementById('versionInfo').textContent = `Version: ${version}`;
+            document.getElementById('versionInfo').textContent = `v${version}`;
         });
 
         async function manualRefresh() {
@@ -209,6 +219,29 @@
             clipboard.writeText(text);
             createNotification('Copied', 'Text copied to clipboard');
         }
+
+        async function manualPasteUpload() {
+            try {
+                // Show uploading state
+                const clipboardText = document.getElementById('clipboardText');
+                const oldContent = clipboardText.textContent;
+                clipboardText.textContent = 'Uploading to cloud...';
+
+                // Trigger the cloudCopy operation
+                await ipcRenderer.invoke('cloudCopy');
+                
+                // Refresh the display after upload
+                await fetchClipboardContent();
+                
+            } catch (error) {
+                console.error('Upload failed:', error);
+                document.getElementById('clipboardType').textContent = 'Error';
+                document.getElementById('clipboardText').textContent = 
+                    `Failed to upload content: ${error.message}`;
+                createNotification('Error', `Upload failed: ${error.message}`);
+            }
+        }
+
     </script>
 </body>
 </html>

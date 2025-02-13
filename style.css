@@ -27,6 +27,8 @@ body {
 
 .header h1 {
     margin: 0;
+    display: flex;
+    align-items: baseline;
 }
 
 button {
@@ -93,6 +95,12 @@ button.icon-button:hover {
 #clipboardInfo {
     border: 4px dashed var(--bg-color);
     border-radius: 8px;
+}
+
+#versionInfo {
+    font-size: 12px;
+    opacity: 0.8;
+    margin-left: 5px;
 }
 
 .settings-container {
