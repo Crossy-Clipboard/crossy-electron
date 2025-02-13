@@ -87,26 +87,31 @@
                 const downloadButton = document.getElementById('downloadButton');
                 const copyButton = document.getElementById('copyButton');
 
+                // Handle JSON responses (text content)
                 if (contentType.includes('application/json')) {
                     const data = await response.json();
                     typeEl.textContent = `Type: ${data.type}`;
-                    textEl.textContent = data.type === 'text' ? data.content : '';
+                    textEl.textContent = data.content;
                     downloadButton.style.display = 'none';
-                    copyButton.style.display = data.type === 'text' ? 'inline-block' : 'none';
-                } else if (contentType.startsWith('image/')) {
-                    const format = contentType.split('/')[1];
-                    typeEl.textContent = 'Type: image';
-                    textEl.textContent = `Format: ${format}`;
-                    downloadButton.style.display = 'inline-block';
-                    copyButton.style.display = 'none';
-                } else {
+                    copyButton.style.display = 'inline-block';
+                } 
+                // Handle file/image responses
+                else {
                     const filename = response.headers.get('content-disposition')
                         ?.split('filename=')[1]?.replace(/"/g, '') || 'file';
                     currentFilename = filename;
-                    typeEl.textContent = 'Type: file';
-                    textEl.textContent = `Filename: ${filename}`;
-                    downloadButton.style.display = 'inline-block';
-                    copyButton.style.display = 'none';
+                    
+                    if (contentType.startsWith('image/')) {
+                        typeEl.textContent = 'Type: image';
+                        textEl.textContent = `Format: ${contentType.split('/')[1]}`;
+                        downloadButton.style.display = 'inline-block';
+                        copyButton.style.display = 'none';
+                    } else {
+                        typeEl.textContent = 'Type: file';
+                        textEl.textContent = `Filename: ${filename}`;
+                        downloadButton.style.display = 'inline-block';
+                        copyButton.style.display = 'none';
+                    }
                 }
             } catch (error) {
                 document.getElementById('clipboardType').textContent = 'Error';
@@ -180,8 +185,60 @@
         });
 
         async function manualRefresh() {
-            await fetchClipboardContent();
-            ipcRenderer.send('manualRefresh');
+            try {
+                const settings = await ipcRenderer.invoke('getSettings');
+                const appKey = await ipcRenderer.invoke('getApiKey');
+                
+                console.log('Starting manual refresh...');
+                
+                // First get local timestamp to ensure accurate comparison
+                const localTimestamp = await ipcRenderer.invoke('getLastLocalTimestamp');
+                
+                // Then get cloud content and timestamp
+                const response = await fetch(`${settings.apiBaseUrl}/app/paste/latest`, {
+                    headers: { 
+                        'AppKey': appKey.trim(),
+                        'Accept': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const cloudData = await response.json();
+                const cloudTimestamp = new Date(cloudData.timestamp).getTime();
+                
+                console.log('Timestamps:', {
+                    cloud: new Date(cloudTimestamp).toISOString(),
+                    local: new Date(localTimestamp).toISOString()
+                });
+
+                // Ensure we're comparing numbers, not strings
+                const cloudTime = Number(cloudTimestamp);
+                const localTime = Number(localTimestamp);
+
+                if (cloudTime > localTime) {
+                    console.log('Cloud content is newer - downloading');
+                    await ipcRenderer.invoke('downloadCloudContent');
+                    // createNotification('Synced', 'Downloaded newer content from cloud');
+                } else if (localTime > cloudTime) {
+                    console.log('Local content is newer - uploading');
+                    await ipcRenderer.invoke('uploadLocalContent');
+                    // createNotification('Synced', 'Uploaded local content to cloud');
+                } else {
+                    console.log('Content is already in sync');
+                    // createNotification('Synced', 'Clipboard already up-to-date');
+                    return;
+                }
+                
+                // Refresh the display after sync
+                await fetchClipboardContent();
+                
+            } catch (error) {
+                console.error('Refresh failed:', error);
+                createNotification('Error', `Refresh failed: ${error.message}`);
+            }
         }
 
         function copyToClipboard() {

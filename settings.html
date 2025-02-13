@@ -140,7 +140,7 @@
                 alert('Please enter an API key');
                 return;
             }
-            await ipcRenderer.send('saveApiKey', apiKey);
+            await ipcRenderer.invoke('saveApiKey', apiKey);
             window.location.reload();
         }
 

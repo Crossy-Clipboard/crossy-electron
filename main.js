@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS = {
         debugLogging: false,
         runInBackground: process.platform === 'darwin', // macOS only, else false
     },
-    apiBaseUrl: 'https://api.crossyclip.com',
+    apiBaseUrl: 'https://dev.crossyclip.com',
     theme: {
         primaryColor: '#6200ee',
         hoverColor: '#3700b3',
@@ -308,7 +308,6 @@ const setupIpcHandlers = () => {
             await cloudPaste();
         } catch (error) {
             logDebug('Manual refresh failed:', error);
-            showNotification('Error', error.message);
             mainWindow?.webContents.send('clipboardError', error.message);
         }
     });
@@ -323,6 +322,46 @@ const setupIpcHandlers = () => {
             logDebug('Failed to clear store:', error);
             showNotification('Error', 'Failed to clear local data');
             return false;
+        }
+    });
+
+    ipcMain.handle('saveApiKey', (event, key) => {
+        saveAppKey(key);
+        return true;
+    });
+
+    // Add this new handler
+    ipcMain.handle('cloudCopy', async () => {
+        try {
+            await cloudCopy();
+            return true;
+        } catch (error) {
+            logDebug('cloudCopy IPC handler error:', error);
+            throw error;
+        }
+    });
+
+    ipcMain.handle('getLastLocalTimestamp', () => {
+        return lastLocalClipboardTimestamp;
+    });
+
+    ipcMain.handle('downloadCloudContent', async () => {
+        try {
+            await cloudPaste();
+            return true;
+        } catch (error) {
+            logDebug('Download failed:', error);
+            throw error;
+        }
+    });
+
+    ipcMain.handle('uploadLocalContent', async () => {
+        try {
+            await cloudCopy();
+            return true;
+        } catch (error) {
+            logDebug('Upload failed:', error);
+            throw error;
         }
     });
 };
@@ -364,42 +403,6 @@ const createWindow = () => {
         }
         mainWindow.setSkipTaskbar(false);
     });
-};
-
-// Replace the checkAndSyncClipboard function
-const checkAndSyncClipboard = async () => {
-    const settings = getSettings();
-    if (!settings.preferences.automaticClipboardSync) return;
-
-    const appKey = getAppKey();
-    if (!appKey) return;
-
-    // Add debouncing check
-    const now = Date.now();
-    if (now - lastOperation.timestamp < DEBOUNCE_DELAY) {
-        logDebug('Debouncing clipboard check');
-        return;
-    }
-
-    try {
-        const response = await axios.get(`${settings.apiBaseUrl}/app/paste/latest`, {
-            headers: { AppKey: appKey }
-        });
-        
-        const cloudTimestamp = parseInt(response.headers['x-clipboard-timestamp']);
-        
-        if (cloudTimestamp > lastLocalClipboardTimestamp && 
-            lastOperation.type !== 'paste') {
-            await cloudPaste();
-            lastOperation = { timestamp: Date.now(), type: 'paste' };
-        } else if (lastLocalClipboardTimestamp > cloudTimestamp && 
-                   lastOperation.type !== 'copy') {
-            await cloudCopy();
-            lastOperation = { timestamp: Date.now(), type: 'copy' };
-        }
-    } catch (error) {
-        logDebug('Operation failed:', error);
-    }
 };
 
 // Replace setupClipboardMonitoring function
@@ -520,7 +523,7 @@ const cloudCopy = async () => {
                 headers: { AppKey: appKey },
             });
             mainWindow?.webContents.send('triggerRefresh');
-            showNotification('Clipboard Synced', 'Text copied to cloud clipboard');
+            showNotification('Clipboard Uploaded', 'Text copied to cloud clipboard');
         } catch (error) {
             logDebug('Operation failed:', error);
             showNotification('Error', error.message);
@@ -608,7 +611,7 @@ const cloudPaste = async () => {
             lastDownloadedContent.timestamp = Date.now();
             clipboard.writeText(textContent);
             mainWindow?.webContents.send('refreshClipboard');
-            showNotification('Clipboard Updated', 'New text content pasted from cloud');
+            showNotification('Clipboard Downloaded', 'New text content pasted from cloud');
             return;
         }
 
