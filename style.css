@@ -1,6 +1,6 @@
 :root {
-    --primary-color: #6200ee;
-    --hover-color: #3700b3;
+    --primary-color: rgb(142, 45, 226);
+    --hover-color: rgb(115, 31, 187);
     --bg-color: #121212;
     --surface-color: #1e1e1e;
     --text-color: #ffffff;
@@ -30,23 +30,32 @@ body {
 }
 
 button {
-    padding: 8px 16px;
-    border: none;
-    border-radius: 4px;
-    background-color: var(--primary-color);
+    padding: clamp(0.5rem, 1vw, 1rem) clamp(1rem, 2vw, 2rem);
+    border-radius: 5px;
+    background: rgba(142, 45, 226, 0.20);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 10px rgba(142, 45, 226, 0.1);
     color: var(--text-color);
     cursor: pointer;
     font-size: 14px;
-    transition: background-color 0.2s;
+    transition: all 0.3s ease;
 }
 
 button:hover {
-    background-color: var(--hover-color);
+    background: rgba(142, 45, 226, 0.3);
+    border-color: rgba(142, 45, 226, 0.5);
+    box-shadow: 3px 3px 15px rgba(142, 45, 226, 0.2),
+                3px 3px 20px rgba(142, 45, 226, 0.1);
+    transform: translateY(-3px);
 }
 
 button:disabled {
-    background-color: #666666;
+    background: rgba(102, 102, 102, 0.15);
+    border-color: rgba(255, 255, 255, 0.05);
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
 }
 
 button.icon-button {
@@ -58,13 +67,17 @@ button.icon-button {
     padding-bottom: 0px;
     padding-left: 5px;
     padding-right: 5px;
+    box-shadow: none;
+    backdrop-filter: none;
 }
 
 button.icon-button:hover {
-    background-color: none;;
-    color: #7b7b7b;
+    background: none;
+    color: color-mix(in srgb, var(--primary-color) 70%, white);
+    transform: none;
+    border: none;
+    box-shadow: none;
 }
-
 
 #saveButton {
     padding: 8px 20px;
@@ -233,16 +246,17 @@ input[readonly]:focus {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #666;
+    background-color: rgba(142, 45, 226, 0.15);
     transition: .3s;
     border-radius: 24px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
 }
 
 .toggle-slider:before {
     position: absolute;
     content: "";
-    height: 18px;
-    width: 18px;
+    height: 16px;
+    width: 16px;
     left: 3px;
     bottom: 3px;
     background-color: white;
@@ -250,8 +264,16 @@ input[readonly]:focus {
     border-radius: 50%;
 }
 
+.toggle-slider:hover {
+    background-color: rgba(142, 45, 226, 0.25);
+    box-shadow: 0 0 10px rgba(142, 45, 226, 0.2),
+                0 0 15px rgba(142, 45, 226, 0.1);
+    border: 1px solid rgba(142, 45, 226, 0.3);
+}
+
 input:checked + .toggle-slider {
     background-color: var(--primary-color);
+    box-shadow: 0 0 10px rgba(142, 45, 226, 0.3);
 }
 
 input:checked + .toggle-slider:before {
