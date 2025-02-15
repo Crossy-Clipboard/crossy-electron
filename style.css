@@ -93,7 +93,7 @@ button.icon-button:hover {
 }
 
 #clipboardInfo {
-    border: 4px dashed var(--bg-color);
+    border: 4px dashed rgba(142, 45, 226, 0.20);
     border-radius: 8px;
 }
 
@@ -207,7 +207,7 @@ input[readonly]:focus {
 }
 
 #clipboardText {
-    margin: 20px 0;
+    margin: 16px;
     word-break: break-word;
 }
 
@@ -232,7 +232,6 @@ input[readonly]:focus {
     margin: 10px 0;
 }
 
-/* Add toggle switch styles */
 .toggle-switch {
     position: relative;
     display: inline-block;
@@ -280,7 +279,7 @@ input[readonly]:focus {
 }
 
 input:checked + .toggle-slider {
-    background-color: var(--primary-color);
+    background-color: rgba(142, 45, 226, 0.5);
     box-shadow: 0 0 10px rgba(142, 45, 226, 0.3);
 }
 
