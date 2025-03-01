@@ -108,7 +108,7 @@ async function cloudCopy(settings, appKey, mainWindow, showNotification) {
                 const filePath = filePaths[0].replace('file://', '');
                 if (fs.existsSync(filePath) && filePath !== lastDownloadedContent.filePath) {
                     await cloudCopyFile(settings, appKey, filePath, mainWindow, showNotification);
-                    mainWindow?.webContents.send('triggerRefresh');
+                    mainWindow?.webContents.send('triggerRefresh'); // Use consistent event name
                 }
             }
         }
@@ -121,7 +121,7 @@ async function cloudCopy(settings, appKey, mainWindow, showNotification) {
                 fs.writeFileSync(tempPath, image.toPNG());
                 await cloudCopyFile(settings, appKey, tempPath, mainWindow, showNotification);
                 fs.unlinkSync(tempPath);
-                mainWindow?.webContents.send('triggerRefresh');
+                mainWindow?.webContents.send('triggerRefresh'); // Use consistent event name
             }
         }
         // Priority 3: Text
@@ -133,11 +133,23 @@ async function cloudCopy(settings, appKey, mainWindow, showNotification) {
                     await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
                         headers: { AppKey: appKey },
                     });
-                    mainWindow?.webContents.send('triggerRefresh');
+                    mainWindow?.webContents.send('triggerRefresh'); // Use consistent event name
                     showNotification('Clipboard Uploaded', 'Text copied to cloud clipboard');
                 }
             }
         }
+
+        // After successful upload
+        syncState.lastOperation = { type: 'upload', timestamp: Date.now() };
+        
+        // Add this to update the cloud hash to prevent immediate re-download
+        if (text) {
+            syncState.updateCloud(text);
+        } else if (image) {
+            syncState.updateCloud(image.toPNG());
+        }
+        
+        mainWindow?.webContents.send('triggerRefresh');
     } catch (error) {
         logger.logDebug('cloudCopy error:', error);
         showNotification('Error', error.message);
@@ -160,6 +172,8 @@ async function cloudCopyFile(settings, appKey, filePath, mainWindow, showNotific
     if (!appKey) return;
 
     try {
+        logger.logDebug('Copying file to cloud:', filePath);
+        
         if (!fs.existsSync(filePath)) {
             throw new Error(`File not found: ${filePath}`);
         }
@@ -167,13 +181,17 @@ async function cloudCopyFile(settings, appKey, filePath, mainWindow, showNotific
         const form = new FormData();
         const fileStream = fs.createReadStream(filePath);
         const fileName = path.basename(filePath);
-        const mimeType = mime.lookup(filePath) || 'application/octet-stream';
+        
+        // Use mime.getType instead of mime.lookup
+        const mimeType = mime.getType(filePath) || 'application/octet-stream';
+        logger.logDebug('File MIME type:', mimeType);
 
         form.append('file', fileStream, {
             filename: fileName,
             contentType: mimeType,
         });
 
+        logger.logDebug('Sending file to server...');
         await axios.post(`${settings.apiBaseUrl}/app/copy`, form, {
             headers: {
                 AppKey: appKey,
@@ -183,7 +201,8 @@ async function cloudCopyFile(settings, appKey, filePath, mainWindow, showNotific
             maxBodyLength: Infinity,
         });
 
-        mainWindow?.webContents.send('refreshClipboard');
+        logger.logDebug('File sent successfully');
+        mainWindow?.webContents.send('triggerRefresh');
         showNotification('Clipboard Uploaded', 'File copied to cloud clipboard');
     } catch (error) {
         logger.logDebug('cloudCopyFile error:', error);
@@ -259,7 +278,7 @@ async function cloudPaste(settings, appKey, mainWindow, showNotification) {
             }
         }
 
-        mainWindow?.webContents.send('refreshClipboard');
+        mainWindow?.webContents.send('triggerRefresh');
     } catch (error) {
         logger.logDebug('cloudPaste error:', error);
         showNotification('Error', error.message);
@@ -277,73 +296,121 @@ async function cloudPaste(settings, appKey, mainWindow, showNotification) {
  * @returns {Promise<void>}
  */
 async function handleLocalClipboardChange(settings, appKey, socket, mainWindow, showNotification) {
-    if (!socket?.connected) {
-        logger.logDebug('Skipping clipboard update - no connection');
+    // Skip if no API key
+    if (!appKey) {
+        logger.logDebug('Skipping clipboard update - no API key');
         return;
     }
 
     const now = Date.now();
+
+    // Prevent operations too soon after last operation
     if (now - lastOperation.timestamp < DEBOUNCE_DELAY) {
-        logger.logDebug('Skipping clipboard update - debounce');
+        logger.logDebug('Skipping clipboard update - debounce active', {
+            timeSinceLast: now - lastOperation.timestamp,
+            debounceNeeded: DEBOUNCE_DELAY
+        });
         return;
     }
 
     try {
+        // Try to begin processing, return if another operation is in progress
         if (!await syncState.beginProcessing()) {
-            logger.logDebug('Skipping clipboard update - sync in progress');
+            logger.logDebug('Skipping clipboard update - sync already in progress');
             return;
         }
 
+        logger.logDebug('Processing local clipboard change');
         const formats = clipboard.availableFormats();
+        logger.logDebug('Available formats:', formats);
 
         // Priority 1: Files
         if (formats.includes('public.file-url') || formats.includes('text/uri-list')) {
-            const filePaths = clipboard.readBuffer('public.file-url').toString('utf8').split('\n').filter(Boolean);
-            if (filePaths.length > 0) {
-                const filePath = filePaths[0].replace('file://', '');
-                if (fs.existsSync(filePath) && filePath !== lastDownloadedContent.filePath) {
-                    await cloudCopyFile(settings, appKey, filePath, mainWindow, showNotification);
-                    lastClipboardContent.timestamp = now;
-                    lastOperation.timestamp = now;
-                    lastOperation.type = 'copy';
+            try {
+                const fileUrlBuffer = clipboard.readBuffer('public.file-url') || 
+                                      clipboard.readBuffer('text/uri-list');
+                const filePaths = fileUrlBuffer.toString('utf8').split('\n').filter(Boolean);
+                
+                if (filePaths.length > 0) {
+                    const filePath = filePaths[0].replace('file://', '')
+                                                .replace(/^\/([A-Z]:)/, '$1') // Fix Windows paths
+                                                .trim();
+                                                
+                    logger.logDebug('Processing file path:', filePath);
+                    
+                    if (fs.existsSync(filePath) && filePath !== lastDownloadedContent.filePath) {
+                        logger.logDebug('File exists and is new, uploading');
+                        await cloudCopyFile(settings, appKey, filePath, mainWindow, showNotification);
+                        mainWindow?.webContents.send('triggerRefresh');
+                        lastClipboardContent.timestamp = now;
+                        lastOperation.timestamp = now;
+                        lastOperation.type = 'copy';
+                    } else {
+                        logger.logDebug('File does not exist or is the same as last downloaded');
+                    }
                 }
+            } catch (error) {
+                logger.logDebug('Error processing file URL:', error);
             }
         }
         // Priority 2: Images
         else if (!clipboard.readImage().isEmpty()) {
-            const image = clipboard.readImage();
-            const imageHash = helper.hashContent(image.toPNG());
-            if (imageHash !== lastDownloadedContent.imageHash) {
-                const tempPath = path.join(app.getPath('temp'), `clipboard-${now}.png`);
-                fs.writeFileSync(tempPath, image.toPNG());
-                await cloudCopyFile(settings, appKey, tempPath, mainWindow, showNotification);
-                try {
-                    fs.unlinkSync(tempPath);
-                } catch (err) {
-                    logger.logDebug('Failed to delete temporary file:', err);
+            try {
+                const image = clipboard.readImage();
+                const imageHash = helper.hashContent(image.toPNG());
+                
+                if (imageHash !== lastDownloadedContent.imageHash) {
+                    logger.logDebug('New image detected, uploading');
+                    const tempPath = path.join(app.getPath('temp'), `clipboard-${now}.png`);
+                    fs.writeFileSync(tempPath, image.toPNG());
+                    await cloudCopyFile(settings, appKey, tempPath, mainWindow, showNotification);
+                    mainWindow?.webContents.send('triggerRefresh');
+                    
+                    try {
+                        fs.unlinkSync(tempPath);
+                    } catch (err) {
+                        logger.logDebug('Failed to delete temporary file:', err);
+                    }
+                    
+                    lastClipboardContent.image = image;
+                    lastClipboardContent.timestamp = now;
+                    lastOperation.timestamp = now;
+                    lastOperation.type = 'copy';
+                } else {
+                    logger.logDebug('Image is unchanged or was previously downloaded');
                 }
-                lastClipboardContent.image = image;
-                lastClipboardContent.timestamp = now;
-                lastOperation.timestamp = now;
-                lastOperation.type = 'copy';
+            } catch (error) {
+                logger.logDebug('Error processing image:', error);
             }
         }
         // Priority 3: Text
         else {
-            const text = clipboard.readText();
-            if (text && text !== lastClipboardContent.text) {
-                const textHash = helper.hashContent(text);
-                if (textHash !== lastDownloadedContent.textHash) {
-                    await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
-                        headers: { AppKey: appKey },
-                    });
-                    lastClipboardContent.text = text;
-                    lastClipboardContent.timestamp = now;
-                    lastOperation.timestamp = now;
-                    lastOperation.type = 'copy';
+            try {
+                const text = clipboard.readText();
+                
+                if (text && text !== lastClipboardContent.text) {
+                    const textHash = helper.hashContent(text);
+                    
+                    if (textHash !== lastDownloadedContent.textHash) {
+                        logger.logDebug('New text detected, uploading');
+                        await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
+                            headers: { AppKey: appKey },
+                        });
+                        mainWindow?.webContents.send('triggerRefresh');
+                        
+                        lastClipboardContent.text = text;
+                        lastClipboardContent.timestamp = now;
+                        lastOperation.timestamp = now;
+                        lastOperation.type = 'copy';
+                    } else {
+                        logger.logDebug('Text is unchanged or was previously downloaded');
+                    }
                 }
+            } catch (error) {
+                logger.logDebug('Error processing text:', error);
             }
         }
+        
     } catch (error) {
         logger.logDebug('Clipboard monitoring error:', error);
         showNotification('Sync Error', 'Failed to sync clipboard changes');
@@ -367,17 +434,85 @@ function setupClipboardMonitoring(settings, appKey, socket, mainWindow, showNoti
     }
 
     logger.logDebug('Setting up clipboard monitoring');
+    
+    // Initialize last content values
     let lastText = clipboard.readText();
+    let lastImageHash = clipboard.readImage().isEmpty() ? '' : 
+                        helper.hashContent(clipboard.readImage().toPNG());
+    let lastFileUrl = '';
+    
+    try {
+        const formats = clipboard.availableFormats();
+        if (formats.includes('public.file-url') || formats.includes('text/uri-list')) {
+            lastFileUrl = clipboard.readBuffer('public.file-url').toString('utf8');
+        }
+    } catch (error) {
+        logger.logDebug('Error reading initial file URL:', error);
+    }
     
     const pollInterval = setInterval(() => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
 
+        let hasChanged = false;
+        const formats = clipboard.availableFormats();
+        
+        // Check for file changes
+        let currentFileUrl = '';
+        if (formats.includes('public.file-url') || formats.includes('text/uri-list')) {
+            try {
+                currentFileUrl = clipboard.readBuffer('public.file-url').toString('utf8');
+                if (currentFileUrl !== lastFileUrl) {
+                    logger.logDebug('File URL changed:', { 
+                        previous: lastFileUrl.substring(0, 50), 
+                        current: currentFileUrl.substring(0, 50) 
+                    });
+                    lastFileUrl = currentFileUrl;
+                    hasChanged = true;
+                }
+            } catch (error) {
+                logger.logDebug('Error reading file URL:', error);
+            }
+        } else if (lastFileUrl) {
+            // Previously had a file URL, but now it's gone
+            logger.logDebug('File URL removed from clipboard');
+            lastFileUrl = '';
+            hasChanged = true;
+        }
+        
+        // Check for image changes
+        if (!clipboard.readImage().isEmpty()) {
+            try {
+                const currentImageHash = helper.hashContent(clipboard.readImage().toPNG());
+                if (currentImageHash !== lastImageHash) {
+                    logger.logDebug('Image changed:', { 
+                        previous: lastImageHash.substring(0, 10), 
+                        current: currentImageHash.substring(0, 10) 
+                    });
+                    lastImageHash = currentImageHash;
+                    hasChanged = true;
+                }
+            } catch (error) {
+                logger.logDebug('Error hashing image:', error);
+            }
+        } else if (lastImageHash) {
+            // Previously had an image, but now it's empty
+            logger.logDebug('Image removed from clipboard');
+            lastImageHash = '';
+            hasChanged = true;
+        }
+        
+        // Check for text changes
         const currentText = clipboard.readText();
         if (currentText !== lastText) {
+            logger.logDebug('Text changed:', { 
+                previous: lastText?.substring(0, 20), 
+                current: currentText?.substring(0, 20) 
+            });
             lastText = currentText;
-            handleLocalClipboardChange(settings, appKey, socket, mainWindow, showNotification);
-        } else {
-            // Even if text hasn't changed, check for images/files
+            hasChanged = true;
+        }
+        
+        if (hasChanged) {
             handleLocalClipboardChange(settings, appKey, socket, mainWindow, showNotification);
         }
     }, 1000);
