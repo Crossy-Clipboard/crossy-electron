@@ -14,6 +14,7 @@ const lastDownloadedContent = {
     textHash: '',
     imageHash: '',
     filePath: '',
+    fileHash: '',  // Add this new field to track file content hash
     debounceDelay: 2000 // 2 second delay
 };
 
@@ -251,7 +252,28 @@ async function cloudPaste(settings, appKey, mainWindow, showNotification) {
             });
 
             const contentType = response.headers['content-type'];
+            
+            // Extract filename with more robust parsing
+            let filename = 'downloaded_file';
+            const disposition = response.headers['content-disposition'];
+            if (disposition) {
+                const filenameMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                if (filenameMatch && filenameMatch[1]) {
+                    filename = filenameMatch[1].replace(/['"]/g, '').trim();
+                }
+            }
+            
+            // Determine file extension from content type if missing
+            if (!path.extname(filename) && contentType) {
+                const extension = mime.getExtension(contentType);
+                if (extension) {
+                    filename = `${filename}.${extension}`;
+                }
+            }
+            
+            // Handle different content types
             if (contentType.startsWith('image/')) {
+                // Existing image handling
                 const imgBuffer = Buffer.from(response.data);
                 lastDownloadedContent.imageHash = helper.hashContent(imgBuffer);
                 lastDownloadedContent.timestamp = Date.now();
@@ -261,20 +283,27 @@ async function cloudPaste(settings, appKey, mainWindow, showNotification) {
                 clipboard.writeImage(img);
                 showNotification('Clipboard Downloaded', 'New image content pasted from cloud');
             } else {
-                let filename = 'downloaded_file';
-                const disposition = response.headers['content-disposition'];
-                if (disposition) {
-                    const match = disposition.match(/filename="?([^"]+)"?/);
-                    if (match) filename = match[1].trim();
-                }
+                // Enhanced file handling
                 const tempPath = path.join(app.getPath('temp'), filename);
                 fs.writeFileSync(tempPath, Buffer.from(response.data));
+                const fileBuffer = Buffer.from(response.data);
+                const fileHash = helper.hashContent(fileBuffer);
                 lastDownloadedContent.filePath = tempPath;
+                lastDownloadedContent.fileHash = fileHash;  // Store the hash
                 lastDownloadedContent.timestamp = Date.now();
                 lastDownloadedContent.textHash = '';
                 lastDownloadedContent.imageHash = '';
-                clipboard.writeBuffer('public.file-url', Buffer.from(`file://${tempPath}`));
-                showNotification('Clipboard Downloaded', 'New file content pasted from cloud');
+                
+                // Use platform-specific clipboard formats
+                if (process.platform === 'win32') {
+                    clipboard.writeBuffer('FileNameW', Buffer.from(tempPath, 'ucs2'));
+                } else if (process.platform === 'darwin') {
+                    clipboard.writeBuffer('public.file-url', Buffer.from(`file://${tempPath}`));
+                } else {
+                    clipboard.writeBuffer('text/uri-list', Buffer.from(`file://${tempPath}`));
+                }
+                
+                showNotification('Clipboard Downloaded', `New file downloaded: ${filename}`);
             }
         }
 
@@ -324,37 +353,153 @@ async function handleLocalClipboardChange(settings, appKey, socket, mainWindow, 
         const formats = clipboard.availableFormats();
         logger.logDebug('Available formats:', formats);
 
+        let handled = false;
+
         // Priority 1: Files
-        if (formats.includes('public.file-url') || formats.includes('text/uri-list')) {
+        if (formats.some(format => format.includes('file') || format.includes('uri-list') || format === 'FileNameW')) {
             try {
-                const fileUrlBuffer = clipboard.readBuffer('public.file-url') || 
-                                      clipboard.readBuffer('text/uri-list');
-                const filePaths = fileUrlBuffer.toString('utf8').split('\n').filter(Boolean);
+                let filePaths = [];
+                
+                // Try different clipboard formats for files based on platform
+                if (process.platform === 'win32') {
+                    // Try Windows specific formats
+                    if (formats.includes('FileNameW')) {
+                        const fileBuffer = clipboard.readBuffer('FileNameW');
+                        const filepath = fileBuffer.toString('ucs2').replace(/\0/g, '');
+                        if (filepath) filePaths.push(filepath);
+                    }
+                    
+                    // Also check for CF_HDROP format
+                    if (formats.includes('CF_HDROP') && filePaths.length === 0) {
+                        try {
+                            const fileBuffer = clipboard.readBuffer('CF_HDROP');
+                            const text = fileBuffer.toString();
+                            if (text) filePaths.push(text);
+                        } catch (err) {
+                            logger.logDebug('Failed to read CF_HDROP:', err);
+                        }
+                    }
+                    
+                    // Try to get from text if it might be a file path and no other paths found
+                    if (filePaths.length === 0) {
+                        const text = clipboard.readText();
+                        if (text && (text.startsWith('file:///') || /^[A-Z]:\\.+/.test(text))) {
+                            filePaths.push(text.replace(/^file:\/\/\//, ''));
+                        }
+                    }
+                } else if (process.platform === 'darwin') {
+                    // macOS specific
+                    if (formats.includes('public.file-url')) {
+                        const fileBuffer = clipboard.readBuffer('public.file-url');
+                        const urls = fileBuffer.toString('utf8').split('\n').filter(Boolean);
+                        filePaths = urls.map(url => decodeURI(url.replace(/^file:\/\//, '')));
+                    }
+                } else {
+                    // Linux and others
+                    if (formats.includes('text/uri-list')) {
+                        const fileBuffer = clipboard.readBuffer('text/uri-list');
+                        const urls = fileBuffer.toString('utf8').split('\n').filter(Boolean);
+                        filePaths = urls.map(url => {
+                            // Handle both with and without file: prefix
+                            if (url.startsWith('file:')) {
+                                return decodeURI(url.replace(/^file:\/\//, ''));
+                            }
+                            return url;
+                        });
+                    }
+                }
+                
+                // Also check text/uri-list on Windows (common when copying from File Explorer)
+                if (process.platform === 'win32' && formats.includes('text/uri-list') && filePaths.length === 0) {
+                    try {
+                        const fileBuffer = clipboard.readBuffer('text/uri-list');
+                        const text = fileBuffer.toString('utf8');
+                        logger.logDebug('text/uri-list content:', text);
+                        
+                        if (text) {
+                            const urls = text.split('\r\n').filter(Boolean);
+                            const validPaths = urls.map(url => {
+                                if (url.startsWith('file:///')) {
+                                    return decodeURI(url.replace(/^file:\/\/\//, ''));
+                                }
+                                return url;
+                            });
+                            filePaths.push(...validPaths);
+                        }
+                    } catch (err) {
+                        logger.logDebug('Failed to read text/uri-list:', err);
+                    }
+                }
+                
+                // Fallback: Try to get file path from text if it looks like a path
+                if (filePaths.length === 0) {
+                    const text = clipboard.readText();
+                    if (text) {
+                        // Check for common file path patterns
+                        if (text.startsWith('/') || text.startsWith('\\\\') || /^[A-Za-z]:[\\\/]/.test(text)) {
+                            filePaths.push(text);
+                        } else if (text.startsWith('file://')) {
+                            filePaths.push(decodeURI(text.replace(/^file:\/\//, '')));
+                        }
+                    }
+                }
+                
+                logger.logDebug('Found file paths:', filePaths);
                 
                 if (filePaths.length > 0) {
-                    const filePath = filePaths[0].replace('file://', '')
-                                                .replace(/^\/([A-Z]:)/, '$1') // Fix Windows paths
-                                                .trim();
-                                                
+                    // Clean up the file path
+                    let filePath = filePaths[0]
+                        .replace(/^file:\/\/\/?/, '') // Handle file:// and file:///
+                        .replace(/^\/([A-Za-z]:)/, '$1') // Fix Windows paths
+                        .replace(/%20/g, ' ') // Handle URL encoded spaces
+                        .trim();
+                    
+                    // On Windows, handle forward slashes
+                    if (process.platform === 'win32') {
+                        filePath = filePath.replace(/\//g, '\\');
+                    }
+                    
                     logger.logDebug('Processing file path:', filePath);
                     
-                    if (fs.existsSync(filePath) && filePath !== lastDownloadedContent.filePath) {
-                        logger.logDebug('File exists and is new, uploading');
-                        await cloudCopyFile(settings, appKey, filePath, mainWindow, showNotification);
-                        mainWindow?.webContents.send('triggerRefresh');
-                        lastClipboardContent.timestamp = now;
-                        lastOperation.timestamp = now;
-                        lastOperation.type = 'copy';
+                    if (fs.existsSync(filePath)) {
+                        // Check if this is different from the last downloaded file
+                        const fileStats = fs.statSync(filePath);
+                        
+                        // Skip if file is too large (>100MB) or is a directory
+                        if (fileStats.isDirectory()) {
+                            logger.logDebug('Skipping directory upload');
+                        } else if (fileStats.size > 100 * 1024 * 1024) {
+                            logger.logDebug('Skipping large file:', fileStats.size);
+                            showNotification('File too large', 'Files over 100MB cannot be uploaded');
+                        } else {
+                            const fileHash = helper.hashContent(fs.readFileSync(filePath));
+                            
+                            // Only upload if file is different from last downloaded file
+                            if (filePath !== lastDownloadedContent.filePath && 
+                                fileHash !== lastDownloadedContent.fileHash) {
+                                logger.logDebug('File exists and is new, uploading');
+                                await cloudCopyFile(settings, appKey, filePath, mainWindow, showNotification);
+                                mainWindow?.webContents.send('triggerRefresh');
+                                
+                                lastClipboardContent.timestamp = now;
+                                lastOperation.timestamp = now;
+                                lastOperation.type = 'copy';
+                                handled = true;
+                            } else {
+                                logger.logDebug('File is the same as last downloaded');
+                            }
+                        }
                     } else {
-                        logger.logDebug('File does not exist or is the same as last downloaded');
+                        logger.logDebug('File path does not exist:', filePath);
                     }
                 }
             } catch (error) {
                 logger.logDebug('Error processing file URL:', error);
             }
         }
-        // Priority 2: Images
-        else if (!clipboard.readImage().isEmpty()) {
+
+        // Priority 2: Images (if files weren't handled)
+        if (!handled && !clipboard.readImage().isEmpty()) {
             try {
                 const image = clipboard.readImage();
                 const imageHash = helper.hashContent(image.toPNG());
@@ -376,6 +521,7 @@ async function handleLocalClipboardChange(settings, appKey, socket, mainWindow, 
                     lastClipboardContent.timestamp = now;
                     lastOperation.timestamp = now;
                     lastOperation.type = 'copy';
+                    handled = true;
                 } else {
                     logger.logDebug('Image is unchanged or was previously downloaded');
                 }
@@ -383,31 +529,28 @@ async function handleLocalClipboardChange(settings, appKey, socket, mainWindow, 
                 logger.logDebug('Error processing image:', error);
             }
         }
-        // Priority 3: Text
-        else {
-            try {
-                const text = clipboard.readText();
+
+        // Priority 3: Text (if nothing else was handled)
+        if (!handled) {
+            const text = clipboard.readText();
+            
+            if (text && text !== lastClipboardContent.text) {
+                const textHash = helper.hashContent(text);
                 
-                if (text && text !== lastClipboardContent.text) {
-                    const textHash = helper.hashContent(text);
+                if (textHash !== lastDownloadedContent.textHash) {
+                    logger.logDebug('New text detected, uploading');
+                    await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
+                        headers: { AppKey: appKey },
+                    });
+                    mainWindow?.webContents.send('triggerRefresh');
                     
-                    if (textHash !== lastDownloadedContent.textHash) {
-                        logger.logDebug('New text detected, uploading');
-                        await axios.post(`${settings.apiBaseUrl}/app/copy`, { text }, {
-                            headers: { AppKey: appKey },
-                        });
-                        mainWindow?.webContents.send('triggerRefresh');
-                        
-                        lastClipboardContent.text = text;
-                        lastClipboardContent.timestamp = now;
-                        lastOperation.timestamp = now;
-                        lastOperation.type = 'copy';
-                    } else {
-                        logger.logDebug('Text is unchanged or was previously downloaded');
-                    }
+                    lastClipboardContent.text = text;
+                    lastClipboardContent.timestamp = now;
+                    lastOperation.timestamp = now;
+                    lastOperation.type = 'copy';
+                } else {
+                    logger.logDebug('Text is unchanged or was previously downloaded');
                 }
-            } catch (error) {
-                logger.logDebug('Error processing text:', error);
             }
         }
         
@@ -435,80 +578,74 @@ function setupClipboardMonitoring(settings, appKey, socket, mainWindow, showNoti
 
     logger.logDebug('Setting up clipboard monitoring');
     
-    // Initialize last content values
-    let lastText = clipboard.readText();
-    let lastImageHash = clipboard.readImage().isEmpty() ? '' : 
-                        helper.hashContent(clipboard.readImage().toPNG());
-    let lastFileUrl = '';
+    // Initialize state
+    let lastState = {
+        text: clipboard.readText(),
+        imageHash: '',
+        fileHash: '',
+        formats: clipboard.availableFormats()
+    };
     
+    // Try to get image hash
+    if (!clipboard.readImage().isEmpty()) {
+        try {
+            lastState.imageHash = helper.hashContent(clipboard.readImage().toPNG());
+        } catch (error) {
+            logger.logDebug('Error hashing initial image:', error);
+        }
+    }
+    
+    // Try to get initial file state
     try {
-        const formats = clipboard.availableFormats();
-        if (formats.includes('public.file-url') || formats.includes('text/uri-list')) {
-            lastFileUrl = clipboard.readBuffer('public.file-url').toString('utf8');
+        if (lastState.formats.some(format => format.includes('file') || format.includes('uri-list'))) {
+            // We'll compute hash on demand if needed
         }
     } catch (error) {
-        logger.logDebug('Error reading initial file URL:', error);
+        logger.logDebug('Error reading initial file state:', error);
     }
     
     const pollInterval = setInterval(() => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
 
         let hasChanged = false;
-        const formats = clipboard.availableFormats();
+        const currentFormats = clipboard.availableFormats();
         
-        // Check for file changes
-        let currentFileUrl = '';
-        if (formats.includes('public.file-url') || formats.includes('text/uri-list')) {
-            try {
-                currentFileUrl = clipboard.readBuffer('public.file-url').toString('utf8');
-                if (currentFileUrl !== lastFileUrl) {
-                    logger.logDebug('File URL changed:', { 
-                        previous: lastFileUrl.substring(0, 50), 
-                        current: currentFileUrl.substring(0, 50) 
-                    });
-                    lastFileUrl = currentFileUrl;
-                    hasChanged = true;
-                }
-            } catch (error) {
-                logger.logDebug('Error reading file URL:', error);
-            }
-        } else if (lastFileUrl) {
-            // Previously had a file URL, but now it's gone
-            logger.logDebug('File URL removed from clipboard');
-            lastFileUrl = '';
+        // Check if formats changed
+        const formatChanged = currentFormats.length !== lastState.formats.length || 
+                            currentFormats.some(format => !lastState.formats.includes(format));
+        
+        if (formatChanged) {
+            logger.logDebug('Clipboard formats changed', {
+                old: lastState.formats,
+                new: currentFormats
+            });
+            lastState.formats = [...currentFormats];
             hasChanged = true;
         }
         
-        // Check for image changes
+        // Check if text changed (also handles file paths as text)
+        const currentText = clipboard.readText();
+        if (currentText !== lastState.text) {
+            logger.logDebug('Text changed');
+            lastState.text = currentText;
+            hasChanged = true;
+        }
+        
+        // Check if image changed
         if (!clipboard.readImage().isEmpty()) {
             try {
                 const currentImageHash = helper.hashContent(clipboard.readImage().toPNG());
-                if (currentImageHash !== lastImageHash) {
-                    logger.logDebug('Image changed:', { 
-                        previous: lastImageHash.substring(0, 10), 
-                        current: currentImageHash.substring(0, 10) 
-                    });
-                    lastImageHash = currentImageHash;
+                if (currentImageHash !== lastState.imageHash) {
+                    logger.logDebug('Image changed');
+                    lastState.imageHash = currentImageHash;
                     hasChanged = true;
                 }
             } catch (error) {
                 logger.logDebug('Error hashing image:', error);
             }
-        } else if (lastImageHash) {
-            // Previously had an image, but now it's empty
-            logger.logDebug('Image removed from clipboard');
-            lastImageHash = '';
-            hasChanged = true;
-        }
-        
-        // Check for text changes
-        const currentText = clipboard.readText();
-        if (currentText !== lastText) {
-            logger.logDebug('Text changed:', { 
-                previous: lastText?.substring(0, 20), 
-                current: currentText?.substring(0, 20) 
-            });
-            lastText = currentText;
+        } else if (lastState.imageHash) {
+            // Image was removed
+            lastState.imageHash = '';
             hasChanged = true;
         }
         
