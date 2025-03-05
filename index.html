@@ -74,6 +74,19 @@
             refreshButton.style.display = settings.preferences.automaticClipboardSync ? 'none' : 'inline-block';
             uploadButton.style.display = settings.preferences.automaticClipboardSync ? 'none' : 'inline-block';
             copyButton.style.display = settings.preferences.automaticClipboardSync ? 'none' : 'inline-block';
+            
+            // Load version information when settings are loaded
+            loadVersionInfo();
+        }
+
+        async function loadVersionInfo() {
+            try {
+                const version = await ipcRenderer.invoke('getVersionInfo');
+                document.getElementById('versionInfo').textContent = `v${version}`;
+            } catch (error) {
+                console.error('Failed to load version info:', error);
+                document.getElementById('versionInfo').textContent = '';
+            }
         }
 
         let lastRefreshTime = 0;
@@ -111,7 +124,12 @@
                         ?.split('filename=')[1]?.replace(/"/g, '') || 'file';
                     currentFilename = filename;
                     
-                    if (contentType.startsWith('image/')) {
+                    if (contentType.startsWith('text/')) {
+                        typeEl.textContent = 'Type: text';
+                        textEl.textContent = `Content: ${filename}`;
+                        downloadButton.style.display = 'none';
+                        copyButton.style.display = 'inline-block';
+                    } else if (contentType.startsWith('image/')) {
                         typeEl.textContent = 'Type: image';
                         textEl.textContent = `Format: ${contentType.split('/')[1]}`;
                         downloadButton.style.display = 'inline-block';
@@ -169,8 +187,6 @@
             createNotification(title, body);
         });
 
-        loadSettings();
-
         ipcRenderer.on('triggerRefresh', () => {
             fetchClipboardContent();
         });
@@ -182,16 +198,6 @@
             document.getElementById('downloadButton').style.display = 'none';
             document.getElementById('copyButton').style.display = 'none';
             document.getElementById('uploadButton').style.display = 'none';
-        });
-
-        fetchClipboardContent();
-
-        document.getElementById('updateButton').addEventListener('click', () => {
-            ipcRenderer.send('checkForUpdates');
-        });
-
-        ipcRenderer.invoke('getVersionInfo').then(version => {
-            document.getElementById('versionInfo').textContent = `v${version}`;
         });
 
         async function manualRefresh() {
@@ -241,6 +247,16 @@
                 createNotification('Error', `Upload failed: ${error.message}`);
             }
         }
+
+        // When document is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSettings();
+            fetchClipboardContent();
+        });
+
+        ipcRenderer.invoke('getVersionInfo').then(version => {
+            document.getElementById('versionInfo').textContent = `v${version}`;
+        });
 
     </script>
 </body>

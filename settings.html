@@ -8,7 +8,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>Crossy Clipboard Settings</h1>
+        <h1>Crossy Clipboard <span id="versionInfo"></span></h1>
         <button onclick="window.location.href='index.html'">Back</button>
     </div>
     <div class="settings-container">
@@ -120,6 +120,10 @@
             document.documentElement.style.setProperty('--bg-color', theme.bgColor);
             document.documentElement.style.setProperty('--surface-color', theme.surfaceColor);
             document.documentElement.style.setProperty('--text-color', theme.textColor);
+
+            // Load version information (only for title at the moment)
+            const version = await ipcRenderer.invoke('getVersionInfo');
+            document.getElementById('versionInfo').textContent = `v${version}`;
         }
 
         window.addEventListener('DOMContentLoaded', async () => {

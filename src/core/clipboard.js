@@ -144,10 +144,15 @@ async function cloudCopy(settings, appKey, mainWindow, showNotification) {
         syncState.lastOperation = { type: 'upload', timestamp: Date.now() };
         
         // Add this to update the cloud hash to prevent immediate re-download
-        if (text) {
-            syncState.updateCloud(text);
-        } else if (image) {
-            syncState.updateCloud(image.toPNG());
+        const currentText = clipboard.readText();
+        const currentImage = clipboard.readImage();
+        
+        if (currentText) {
+            syncState.updateCloud(currentText);
+        } else if (!currentImage.isEmpty()) {
+            syncState.updateCloud(currentImage.toPNG());
+        } else {
+            logger.logDebug('No content to update cloud hash');
         }
         
         mainWindow?.webContents.send('triggerRefresh');
